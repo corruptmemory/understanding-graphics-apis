@@ -90,8 +90,8 @@ main :: () {
 
 - [ ] **Step 3: Run the smoke check to verify it fails**
 
-Run: `~/jai/jai/bin/jai-linux modules/Vulkan/smoke.jai -import_dir modules`
-Expected: FAIL (no `generated_linux.jai` yet, so `module.jai` cannot `#load` it).
+Run: `~/jai/jai/bin/jai-linux modules/Vulkan/smoke.jai -import_dir "$PWD/modules"`
+Expected: FAIL (no `generated_linux.jai` yet, so `module.jai` cannot `#load` it). The import directory must be absolute: a relative `-import_dir` is resolved against the main source file's directory, not the working directory, and would silently fall through to the distribution's module.
 
 - [ ] **Step 4: Write `modules/Vulkan/linux_extras.jai`**
 
@@ -174,7 +174,8 @@ Expected: ends with `OK! generated 'generated_linux.jai'`; exactly 9 `Could not 
 
 - [ ] **Step 8: Run the smoke check to verify it passes**
 
-Run: `~/jai/jai/bin/jai-linux modules/Vulkan/smoke.jai -import_dir modules && ./smoke && rm -f smoke`
+Run: `~/jai/jai/bin/jai-linux modules/Vulkan/smoke.jai -import_dir "$PWD/modules" && modules/Vulkan/smoke && rm -f modules/Vulkan/smoke && rm -rf modules/Vulkan/.build`
+(The binary and the `.build/` intermediates land next to the main source file.)
 Expected: prints `Vulkan bindings OK: header 363, api 1.3 = 4206592`.
 
 - [ ] **Step 9: Ignore build artefacts and commit**
