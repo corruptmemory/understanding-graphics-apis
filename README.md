@@ -24,6 +24,7 @@ Everything goes through the build program:
 | `capture <api>/<name> [path]` | run the tests with `-capture`; the last readback lands in `path` (default `build/<api>-<name>.png`)                   |
 | `shaders <api>/<name>`        | `glslc` every `shaders/*.vert`, `*.frag`, `*.comp` into `<target>/.build/spv/`                                        |
 | `check-lessons`               | check every `lessons/**/*.html`, `index.html` and `spine.js` against the lesson markup contract                       |
+| `concept-map`                 | regenerate `lessons/concept-map.html` from every lesson's sidebars; `check-lessons` flags a stale map                 |
 | `regen-vulkan-bindings`       | refresh `modules/Vulkan/source/` from `/usr/include/vulkan/` and regenerate the bindings                              |
 
 A target is a directory `<api>/<name>/`, for example `vulkan/exercise-3`. Test binaries run

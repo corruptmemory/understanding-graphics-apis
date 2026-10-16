@@ -36,6 +36,7 @@ VERBS :: string.[
     "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
     "check-lessons                      check every lessons/**/*.html, index.html and spine.js against the markup contract",
+    "concept-map                        regenerate lessons/concept-map.html from every lesson's sidebars",
     "regen-vulkan-bindings              refresh modules/Vulkan/source from /usr/include/vulkan and regenerate",
 ];
 
@@ -100,6 +101,13 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
         for findings  print("%:%: %\n", it.path, it.line, it.message);
         print("% pages checked, % findings\n", pages, findings.count);
         ok = findings.count == 0;
+
+      case "concept-map";
+        entries := collect_sidebars(ROOT);
+        path := tprint("%1lessons/concept-map.html", ROOT);
+        ok = write_entire_file(path, concept_map_html(entries));
+        if ok  print("concept-map: lessons/concept-map.html (% entries)\n", entries.count);
+        else   log_error("concept-map: could not write %", path);
 
       case "regen-vulkan-bindings";
         ok = regen_vulkan_bindings();

@@ -398,12 +398,156 @@ check_all :: (root: string) -> (findings: [..] Finding, pages: int) {
         array_add(*findings, .{INDEX, 0, "index.html is missing"});
     }
 
+    MAP :: "lessons/concept-map.html";
+    committed, has_map := read_entire_file(tprint("%1%2", root, MAP), log_errors = false);
+    if !has_map {
+        array_add(*findings, .{MAP, 0, "lessons/concept-map.html is missing: run first.jai - concept-map"});
+    } else {
+        if committed != concept_map_html(collect_sidebars(root)) {
+            array_add(*findings, .{MAP, 0, "lessons/concept-map.html is stale: run first.jai - concept-map"});
+        } else {
+            for check_links(committed, MAP, root)  array_add(*findings, it);
+        }
+        count += 1;
+    }
+
     SPINE :: "lessons/assets/spine.js";
     js, ok := read_entire_file(tprint("%1%2", root, SPINE), log_errors = false);
     if ok  for check_js(js, SPINE)  array_add(*findings, it);
 
     return findings, count;
 }
+
+// ---- the concept map -----------------------------------------------------------------------------
+
+// One sidebar from one lesson page: the Vulkan term, the lesson, and what the other APIs call it.
+Sidebar_Entry :: struct {
+    term:         string;
+    track:        string;
+    number:       string;
+    lesson_title: string;
+    href:         string;   // "vulkan/03-shaders.html#sb-clear", relative to lessons/
+    d3d12:        string;   // the dd after the "D3D12" dt, or ""
+    metal:        string;   // the dd after the "Metal" dt, or ""
+}
+
+// Every sidebar in every lessons/<track>/NN-*.html, sorted by term (case-insensitively), then
+// track, then lesson number. The template and anything outside a track directory are never read.
+collect_sidebars :: (root: string) -> [..] Sidebar_Entry {
+    entries: [..] Sidebar_Entry;
+    for page: lesson_pages(root) {
+        segments := split(page, "/");
+        if segments.count != 3  continue;   // lessons/<track>/<file>
+        file := segments[2];
+        if file.count < 3 || !is_digit_char(file[0]) || !is_digit_char(file[1]) || file[2] != #char "-"  continue;
+
+        html, ok := read_entire_file(tprint("%1%2", root, page), log_errors = false);
+        if !ok  continue;
+
+        track := "";
+        number := "";
+        title := "";
+        articles := collect(html, "article", "lesson");
+        if articles.count {
+            t, _  := attr(articles[0], "data-track");
+            n, _  := attr(articles[0], "data-number");
+            track  = t;
+            number = n;
+        }
+        h1s := collect(html, "h1", "");
+        if h1s.count  title = trim(inner(html, h1s[0]));
+
+        for sb: collect(html, "aside", "sidebar") {
+            e: Sidebar_Entry;
+            term, _ := attr(sb, "data-term");
+            id, _   := attr(sb, "id");
+            e.term         = term;
+            e.track        = track;
+            e.number       = number;
+            e.lesson_title = title;
+            e.href         = tprint("%1/%2#%3", segments[1], file, id);
+
+            body := inner(html, sb);
+            dls  := collect(body, "dl", "elsewhere");
+            if dls.count {
+                pairs := inner(body, dls[0]);
+                api := "";
+                at := 0;
+                while true {
+                    tag, found := next_tag(pairs, at);
+                    if !found  break;
+                    at = tag.end;
+                    if tag.name == "dt" {
+                        api = trim(inner(pairs, tag));
+                    } else if tag.name == "dd" {
+                        text := trim(inner(pairs, tag));
+                        if api == "D3D12"       e.d3d12 = text;
+                        else if api == "Metal"  e.metal = text;
+                    }
+                }
+            }
+            array_add(*entries, e);
+        }
+    }
+    quick_sort(entries, compare_entries);
+    return entries;
+}
+
+compare_entries :: (a: Sidebar_Entry, b: Sidebar_Entry) -> int {
+    c := compare_strings(to_lower_copy(a.term), to_lower_copy(b.term));
+    if c != 0  return c;
+    c = compare_strings(a.track, b.track);
+    if c != 0  return c;
+    na, _ := string_to_int(a.number);
+    nb, _ := string_to_int(b.number);
+    if na < nb  return -1;
+    if na > nb  return 1;
+    return 0;
+}
+
+// The whole concept-map page. Deterministic, so check_all can compare it with the committed file.
+concept_map_html :: (entries: [] Sidebar_Entry) -> string {
+    b: String_Builder;
+    append(*b, CONCEPT_MAP_HEAD);
+    if entries.count == 0 {
+        append(*b, "<p class=\"empty\">No sidebars yet.</p>\n");
+    } else {
+        append(*b, "<table class=\"concept-map\">\n<thead><tr><th>Term</th><th>Lesson</th><th>D3D12</th><th>Metal</th></tr></thead>\n<tbody>\n");
+        for entries {
+            print_to_builder(*b, "<tr><td>%1</td><td><a href=\"%2\">%3 %4: %5</a></td><td>%6</td><td>%7</td></tr>\n",
+                             it.term, it.href, it.track, it.number, it.lesson_title, cell(it.d3d12), cell(it.metal));
+        }
+        append(*b, "</tbody>\n</table>\n");
+    }
+    append(*b, CONCEPT_MAP_FOOT);
+    return builder_to_string(*b);
+}
+
+cell :: (s: string) -> string { return ifx s.count then s else "—"; }
+
+CONCEPT_MAP_HEAD :: #string HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept map</title>
+<link rel="stylesheet" href="assets/lesson.css">
+</head>
+<body>
+<main class="page">
+<p class="crumbs"><a href="../index.html">Understanding Graphics APIs</a> · Concept map</p>
+<h1>Concept map</h1>
+<p class="lead">The cross-API glossary, assembled by <code>first.jai - concept-map</code> from every sidebar in every
+lesson: the Vulkan term, the lesson that introduces it, and what D3D12 and Metal call it. Generated;
+edit the sidebar, not this page.</p>
+HTML
+
+CONCEPT_MAP_FOOT :: #string HTML
+</main>
+</body>
+</html>
+HTML
 
 // ---- the tag scanner ---------------------------------------------------------------------------
 
@@ -554,5 +698,6 @@ count_lines :: (text: string) -> int {
     return n;
 }
 
-is_ws        :: (c: u8) -> bool { return c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r"; }
+is_ws         :: (c: u8) -> bool { return c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r"; }
+is_digit_char :: (c: u8) -> bool { return c >= #char "0" && c <= #char "9"; }
 is_name_char :: (c: u8) -> bool { return (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z") || (c >= #char "0" && c <= #char "9") || c == #char "-"; }

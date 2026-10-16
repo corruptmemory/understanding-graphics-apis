@@ -264,6 +264,21 @@ pre[data-illustrative]::before {
   * { transition: none !important; }
 }
 
+/* ---- plain pages: the concept map ---------------------------------------------------------- */
+
+.page { max-width: 1100px; margin: 0 auto; padding: 0 1.25rem 3rem; }
+.page .crumbs { padding-top: 1rem; }
+table.concept-map { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+table.concept-map th, table.concept-map td {
+  text-align: left;
+  vertical-align: top;
+  padding: .45rem .6rem;
+  border-bottom: 1px solid var(--line);
+}
+table.concept-map th { font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-2); }
+table.concept-map td { max-width: 40ch; }
+.empty { color: var(--fg-2); font-style: italic; }
+
 /* ---- the landing page ---------------------------------------------------------------------- */
 
 .site { max-width: 1500px; margin: 0 auto; padding: 0 1.25rem 3rem; }

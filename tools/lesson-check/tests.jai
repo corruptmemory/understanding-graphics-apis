@@ -202,6 +202,24 @@ main :: () {
     report("line_of second line", line_of("a\nb\nc", 2) == 2, tprint("got %", line_of("a\nb\nc", 2)));
     report("line_of third line",  line_of("a\nb\nc", 4) == 3, tprint("got %", line_of("a\nb\nc", 4)));
 
+    // ---- the concept map --------------------------------------------------------------
+    entries := collect_sidebars(fixtures);
+    report("collect_sidebars finds the three sidebars in the track pages", entries.count == 3, tprint("got % entries", entries.count));
+    if entries.count == 3 {
+        report("collect_sidebars sorts by term then lesson",
+               entries[0].term == "Fence" && entries[1].term == "Queue" && entries[1].number == "0" && entries[2].number == "1",
+               tprint("got %/%, %/%, %/%", entries[0].term, entries[0].number, entries[1].term, entries[1].number, entries[2].term, entries[2].number));
+        e := entries[1];
+        report("collect_sidebars fills the lesson and api cells",
+               e.href == "vulkan/00-a.html#sb-queue" && e.track == "vulkan" && e.lesson_title == "A" && e.d3d12 == "command queue" && e.metal == "MTLCommandQueue",
+               tprint("got href '%', track '%', title '%', d3d12 '%', metal '%'", e.href, e.track, e.lesson_title, e.d3d12, e.metal));
+    }
+    page := concept_map_html(entries);
+    _, rows := replace(page, "<tr><td>", "");
+    report("concept_map_html links the lesson", contains(page, "<td><a href=\"vulkan/00-a.html#sb-queue\">vulkan 0: A</a></td>"), page);
+    report("concept_map_html has one row per sidebar", rows == 3, tprint("got % rows", rows));
+    report("concept_map_html says when there are no sidebars", contains(concept_map_html(.[]), "No sidebars yet."), concept_map_html(.[]));
+
     js_bad  := check_js("const x = fetch('a')", "spine.js");
     js_good := check_js("const y = 1", "spine.js");
     report("check_js flags fetch",   js_bad.count == 1 && contains(js_bad[0].message, "fetch("), describe(js_bad));
