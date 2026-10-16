@@ -113,6 +113,10 @@ check_lesson :: (html: string, page_path: string, root: string) -> [..] Finding 
             if collect(pairs, "dt", "").count == 0 || collect(pairs, "dd", "").count == 0 {
                 add(*findings, page_path, html, it.start, "sidebar's dl.elsewhere has no dt/dd pair");
             }
+            for dt: collect(pairs, "dt", "") {   // the concept map only knows these two columns
+                api := trim(inner(pairs, dt));
+                if api != "D3D12" && api != "Metal"  add(*findings, page_path, html, it.start, tprint("sidebar dt '%' is not D3D12 or Metal", api));
+            }
         }
     }
 
@@ -442,7 +446,10 @@ collect_sidebars :: (root: string) -> [..] Sidebar_Entry {
         if file.count < 3 || !is_digit_char(file[0]) || !is_digit_char(file[1]) || file[2] != #char "-"  continue;
 
         html, ok := read_entire_file(tprint("%1%2", root, page), log_errors = false);
-        if !ok  continue;
+        if !ok {
+            log_error("concept-map: could not read %; its sidebars are missing from the map", page);
+            continue;
+        }
 
         track := "";
         number := "";

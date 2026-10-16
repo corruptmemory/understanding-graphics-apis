@@ -4,9 +4,21 @@
 // names the findings it expects. No GPU, no Gfx_Test.
 
 #import "Basic";
+#import "File";
+#import "Process";
 #import "String";
 
 #load "check.jai";
+
+// The error-recording logger: errors handed to log_error become assertable.
+Error_Recorder :: struct { errors: [..] string; }
+
+record_errors :: (message: string, data: *void, info: Log_Info) {
+    if info.common_flags & .ERROR {
+        rec := cast(*Error_Recorder) data;
+        array_add(*rec.errors, copy_string(message));
+    }
+}
 
 Case :: struct { name: string; from: string; to: string; expect: [] string; }   // expect: one substring per expected finding
 
@@ -24,6 +36,7 @@ CASES :: Case.[
     .{"two-outcomes",               "<li>outcome three</li>", "", .["outcomes has 2 items, want 3"]},
     .{"sidebar-no-term",            " data-term=\"Command buffer\"", "", .["sidebar lacks data-term"]},
     .{"sidebar-no-dl",              "<dl class=\"elsewhere\">", "<dl>", .["sidebar has no dl.elsewhere"]},
+    .{"sidebar-unknown-api",        "<dt>D3D12</dt>", "<dt>DirectX 12</dt>", .["sidebar dt 'DirectX 12' is not D3D12 or Metal"]},
     .{"lanes-out-of-order",         "data-lane=\"driver\"", "data-lane=\"gpu\"", .["lanes are [cpu, gpu, gpu], want cpu, driver, gpu"]},
     .{"no-sources",                 "<section class=\"sources\">", "<section class=\"refs\">", .["no sources section"]},
     .{"no-next",                    "<p class=\"next\">", "<p class=\"last\">", .["no next link"]},
@@ -214,6 +227,28 @@ main :: () {
                e.href == "vulkan/00-a.html#sb-queue" && e.track == "vulkan" && e.lesson_title == "A" && e.d3d12 == "command queue" && e.metal == "MTLCommandQueue",
                tprint("got href '%', track '%', title '%', d3d12 '%', metal '%'", e.href, e.track, e.lesson_title, e.d3d12, e.metal));
     }
+    // An unreadable lesson page must be reported through log_error, never skipped: the concept-map
+    // verb would otherwise write a map without that lesson's terms and say nothing.
+    scratch  := tprint("%.build/unreadable/", #filepath);
+    page_dir := tprint("%lessons/vulkan/", scratch);
+    make_directory_if_it_does_not_exist(page_dir, recursive = true);
+    locked := tprint("%1%2", page_dir, "00-locked.html");   // not "%00-…": a digit after % is a positional argument
+    write_entire_file(locked, "<article class=\"lesson\" data-track=\"vulkan\" data-number=\"0\"><h1>Locked</h1></article>");
+    run_command("chmod", "000", locked);
+    rec: Error_Recorder;
+    ctx := context;
+    ctx.logger      = record_errors;
+    ctx.logger_data = *rec;
+    locked_entries: [..] Sidebar_Entry;
+    push_context ctx {
+        locked_entries = collect_sidebars(scratch);
+    }
+    run_command("chmod", "644", locked);
+    file_delete(locked);
+    report("collect_sidebars reports an unreadable page",
+           rec.errors.count == 1 && contains(rec.errors[0], "00-locked.html") && locked_entries.count == 0,
+           tprint("% errors logged: %; % entries", rec.errors.count, rec.errors, locked_entries.count));
+
     page := concept_map_html(entries);
     _, rows := replace(page, "<tr><td>", "");
     report("concept_map_html links the lesson", contains(page, "<td><a href=\"vulkan/00-a.html#sb-queue\">vulkan 0: A</a></td>"), page);

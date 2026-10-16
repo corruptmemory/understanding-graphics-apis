@@ -35,7 +35,7 @@
   <pre id="results">running…</pre>
   <section class="step" id="a" style="min-height: 900px"><h2>a</h2></section>
   <section class="step" id="b" style="min-height: 900px"><h2>b</h2></section>
-  <section class="step" id="c" style="min-height: 900px"><h2>c</h2></section>
+  <section class="step" id="c" style="min-height: 400px"><h2>c</h2></section>   <!-- short: its top never reaches the reading line at the bottom of the page -->
   <div style="width: 420px">
     <div class="lane" data-lane="cpu"><span class="lane-tag">narrow</span><div class="bar" id="narrow-bar">
       <button class="box" data-step="x">first box label</button>
@@ -140,9 +140,15 @@ window.addEventListener('load', async () => {
   });
 
   await t('scrolling activates the step at the line', async () => {
-    window.scrollTo(0, 950);
+    window.scrollTo(0, $('#b').offsetTop - 100);
     await frames();
     assert(Spine.state.active === 'b', 'active is ' + Spine.state.active + ' at scrollY ' + window.scrollY);
+  });
+
+  await t('the last step lights at the bottom of the page', async () => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await frames();
+    assert(Spine.state.active === 'c', 'active is ' + Spine.state.active + ' at scrollY ' + window.scrollY);
   });
 
   await t('lanes scroll, the page does not', () => {

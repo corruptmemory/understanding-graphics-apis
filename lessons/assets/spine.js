@@ -98,12 +98,16 @@
     });
   }
 
-  // The reading line sits 40 % down the viewport, below the strip when there is one.
+  // The reading line sits 40 % down the viewport, below the strip when there is one. At the
+  // bottom of a scrollable page the last step is the one being read, however short it is.
   function update() {
     if (!steps.length) return;
     var tops = steps.map(function (s) { return s.getBoundingClientRect().top; });
     var line = 0.4 * window.innerHeight + (strip ? strip.offsetHeight : 0);
-    var id = steps[pick(tops, line)].id;
+    var index = pick(tops, line);
+    var height = document.documentElement.scrollHeight;
+    if (height > window.innerHeight + 2 && window.scrollY + window.innerHeight >= height - 2) index = steps.length - 1;
+    var id = steps[index].id;
     if (id !== state.active) activate(id);
   }
 

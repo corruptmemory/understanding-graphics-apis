@@ -10,8 +10,9 @@ that is what the reader writes; Vulkan's own identifiers are quoted as they are.
 1. Copy `lessons/_template.html` to `lessons/<track>/NN-<slug>.html`, for example
    `lessons/vulkan/03-shaders.html`. Two digits, a dash, a short slug.
 2. The template lives one directory up from the tracks, so fix the relative paths after copying:
-   `assets/` becomes `../assets/`, `../vulkan/...` becomes `../../vulkan/...`, and the deep-dives link
-   becomes `deep-dives/README.md`.
+   `assets/` becomes `../assets/`, every link that starts with `../` gains one more `../` (the index
+   crumb, the exercise link, the sources, the next link), and the deep-dives link becomes
+   `deep-dives/README.md`. `check-lessons` reports any link that still misses.
 3. Set `data-track` and `data-number` on the `<article>`, the crumbs, the title, and the exercise link.
 4. Write the steps, the spine, the sidebars, the endnotes, the sources and the next link, in that
    order on the page.
@@ -73,7 +74,8 @@ as such. Keep it to a few lines.
 ## Sidebars
 
 A sidebar is where a concept gets its cross-API names. Its `data-term` is the Vulkan term; the
-`dl.elsewhere` holds one `dt`/`dd` pair per other API. That shape is what `first.jai - concept-map` reads
+`dl.elsewhere` holds one `dt`/`dd` pair per other API, and the `dt` is spelled exactly `D3D12` or `Metal`,
+the two columns the map has (the checker rejects any other spelling). That shape is what `first.jai - concept-map` reads
 to assemble `lessons/concept-map.html`, which is why it is required: a sidebar written as free prose
 would be invisible to the glossary. Give each sidebar an `id` (`sb-<slug>`) so the map can link to it.
 
