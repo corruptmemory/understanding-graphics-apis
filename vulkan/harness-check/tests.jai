@@ -63,6 +63,13 @@ validation_error_is_recorded :: (ctx: *Gfx_Context) -> bool {
     return ctx.recorder.errors == 1 && ctx.recorder.messages.count >= 1;
 }
 
+// The loader announces every implicit layer the test runner disabled; those notices are not
+// validation warnings and must not count as such, or warnings_fatal is unusable on a desktop
+// with overlays installed.
+fresh_context_has_no_warnings :: (ctx: *Gfx_Context) -> bool {
+    return ctx.recorder.warnings == 0 && ctx.recorder.messages.count == 0;
+}
+
 missing_layer_is_reported :: (ctx: *Gfx_Context) -> bool {
     other := gfx_init(.{layer_name = "VK_LAYER_DOES_NOT_EXIST"});
     return other == null;   // and the run shows a log_error naming VK_LAYER_DOES_NOT_EXIST
@@ -75,6 +82,7 @@ CASES :: Test_Case.[
     .{name = "memory_type_table",                     proc = memory_type_table},
     .{name = "device_comes_up_with_1_3_features",     proc = device_comes_up_with_1_3_features},
     .{name = "validation_error_is_recorded",          proc = validation_error_is_recorded, expect_validation_errors = 1},
+    .{name = "fresh_context_has_no_warnings",         proc = fresh_context_has_no_warnings, warnings_fatal = true},
     .{name = "missing_layer_is_reported",             proc = missing_layer_is_reported},
 ];
 

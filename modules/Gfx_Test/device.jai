@@ -31,6 +31,11 @@ find_memory_type :: (props: VkPhysicalDeviceMemoryProperties, type_bits: u32, wa
 
 debug_callback :: (severity: VkDebugUtilsMessageSeverityFlagBitsEXT, types: VkDebugUtilsMessageTypeFlagsEXT,
                    data: *VkDebugUtilsMessengerCallbackDataEXT, user: *void) -> VkBool32 #c_call {
+    // General-type messages are the loader talking (e.g. "layer X forced disabled by
+    // VK_LOADER_LAYERS_DISABLE"); they are not validation findings. Keep only errors from
+    // that channel so warnings_fatal stays meaningful on a desktop with overlay layers.
+    if (types & .GENERAL_BIT_EXT) && !(severity & .ERROR_BIT_EXT)  return VK_FALSE;
+
     push_context {
         rec := cast(*Error_Recorder) user;
         if severity & .ERROR_BIT_EXT {
