@@ -79,8 +79,13 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
       case "capture";
         target, found := require_target(verb, rest);
         path := ifx rest.count > 1 then rest[1] else tprint("%1build/%2.png", ROOT, binary_name(target, ""));
+        file_delete(path);   // a stale capture must never pass for a fresh one
         ok = found && build_target(target, "tests.jai", "-tests")
                    && run_binary(binary_path(target, "-tests"), .["-capture", path], TEST_ENV) == 0;
+        if ok && !file_exists(path) {
+            log_error("capture: % was not written; did any test case call readback?", path);
+            ok = false;
+        }
         if ok  print("capture: %\n", path);
 
       case "shaders";

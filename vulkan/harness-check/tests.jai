@@ -73,6 +73,14 @@ fresh_context_has_no_warnings :: (ctx: *Gfx_Context) -> bool {
     return ctx.recorder.warnings == 0 && ctx.recorder.messages.count == 0;
 }
 
+// The runner's output contract: a warning on a PASSING case is still shown, with a count on
+// the PASS line, because a learner should see what the validation layer thinks is dubious.
+warning_is_visible_on_pass :: (ctx: *Gfx_Context) -> bool {
+    ctx.recorder.warnings += 1;
+    array_add(*ctx.recorder.messages, copy_string("synthetic warning: the runner must print this on a PASS"));
+    return true;
+}
+
 missing_layer_is_reported :: (ctx: *Gfx_Context) -> bool {
     other := gfx_init(.{layer_name = "VK_LAYER_DOES_NOT_EXIST"});
     return other == null;   // and the run shows a log_error naming VK_LAYER_DOES_NOT_EXIST
@@ -147,6 +155,7 @@ CASES :: Test_Case.[
     .{name = "device_comes_up_with_1_3_features",     proc = device_comes_up_with_1_3_features},
     .{name = "validation_error_is_recorded",          proc = validation_error_is_recorded, expect_validation_errors = 1},
     .{name = "fresh_context_has_no_warnings",         proc = fresh_context_has_no_warnings, warnings_fatal = true},
+    .{name = "warning_is_visible_on_pass",            proc = warning_is_visible_on_pass},
     .{name = "missing_layer_is_reported",             proc = missing_layer_is_reported},
     .{name = "clear_color_reads_back",                proc = clear_color_reads_back},
     .{name = "expect_pixel_out_of_range_fails_cleanly", proc = expect_pixel_out_of_range_fails_cleanly},

@@ -90,8 +90,19 @@ gfx_init :: (options := Gfx_Init_Options.{}) -> *Gfx_Context {
 
     result := vkCreateInstance(*ici, null, *ctx.instance);
     if result != .SUCCESS {
-        log_error("vkCreateInstance failed: % (is the layer '%' installed, and the loader 1.3 or newer?)", result, options.layer_name);
-        free(ctx);
+        // The messenger was chained into the create info, so the loader's own explanation
+        // (missing layer, no ICD, failed driver load) is in the recorder: show it, then free.
+        for ctx.recorder.messages  print("    loader: %\n", it);
+        hint := "";
+        if result == {
+          case .ERROR_LAYER_NOT_PRESENT;     hint = tprint("the layer '%' is not installed or not on the loader's search path", options.layer_name);
+          case .ERROR_INCOMPATIBLE_DRIVER;   hint = "no Vulkan 1.3 driver (ICD) was found; check the installed driver and VK_ICD_FILENAMES";
+          case .ERROR_EXTENSION_NOT_PRESENT; hint = "an instance extension is missing: VK_KHR_surface, VK_KHR_xlib_surface or VK_EXT_debug_utils";
+          case;                              hint = "see the loader messages above";
+        }
+        log_error("vkCreateInstance failed: % (%)", result, hint);
+        ctx.instance = null;
+        gfx_shutdown(ctx);
         return null;
     }
 

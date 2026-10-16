@@ -53,9 +53,12 @@ run_tests :: (cases: [] Test_Case, args: [] string) -> s32 {   // an exit code
             reason = tprint("% validation warnings", ctx.recorder.warnings);
         }
 
-        if reason.count > 0 || verbose {
+        // Warnings are never fatal by default, but they are always shown: a learner should
+        // see what the validation layer found dubious even when the pixels came out right.
+        if reason.count > 0 || verbose || ctx.recorder.warnings > 0 {
             for msg: ctx.recorder.messages  print("    %\n", msg);
         }
+        warnings := ctx.recorder.warnings;
 
         errors_before := ctx.recorder.errors;
         errors_after  := gfx_shutdown(ctx);
@@ -66,6 +69,9 @@ run_tests :: (cases: [] Test_Case, args: [] string) -> s32 {   // an exit code
         if reason.count > 0 {
             print("FAIL %: %\n", test.name, reason);
             failed += 1;
+        } else if warnings > 0 {
+            print("PASS % (% warning%)\n", test.name, warnings, ifx warnings == 1 then "" else "s");
+            passed += 1;
         } else {
             print("PASS %\n", test.name);
             passed += 1;
