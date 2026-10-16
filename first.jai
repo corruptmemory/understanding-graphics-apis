@@ -23,6 +23,8 @@
 #import "Sort";
 #import "String";
 
+#load "tools/lesson-check/check.jai";   // check_all, for the check-lessons verb
+
 ROOT :: #filepath;   // absolute, trailing slash
 
 VERBS :: string.[
@@ -30,9 +32,10 @@ VERBS :: string.[
     "build <api>/<name>                 compile <api>/<name>/main.jai to build/<api>-<name> (shaders first)",
     "run <api>/<name> [args...]         build, then run the binary with args",
     "test <api>/<name> [args...]        compile tests.jai to build/<api>-<name>-tests and run it headlessly",
-    "test-all                           run every <api>/<name>/tests.jai under vulkan/, directx/, metal/",
+    "test-all                           run every <api>/<name>/tests.jai under vulkan/, directx/, metal/, tools/",
     "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
+    "check-lessons                      check every lessons/**/*.html, index.html and spine.js against the markup contract",
     "regen-vulkan-bindings              refresh modules/Vulkan/source from /usr/include/vulkan and regenerate",
 ];
 
@@ -91,6 +94,12 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
       case "shaders";
         target, found := require_target(verb, rest);
         ok = found && compile_shaders(target);
+
+      case "check-lessons";
+        findings, pages := check_all(ROOT);
+        for findings  print("%:%: %\n", it.path, it.line, it.message);
+        print("% pages checked, % findings\n", pages, findings.count);
+        ok = findings.count == 0;
 
       case "regen-vulkan-bindings";
         ok = regen_vulkan_bindings();
@@ -227,7 +236,7 @@ run_binary :: (path: string, args: [] string, env: [] string) -> s32 {
 // Every target with a tests.jai, in sorted order; one summary line each, then a total.
 test_all :: () -> bool {
     targets: [..] string;
-    for api: string.["vulkan", "directx", "metal"] {
+    for api: string.["vulkan", "directx", "metal", "tools"] {
         dir := tprint("%1%2", ROOT, api);
         if !file_exists(dir)  continue;
         for file_list(dir, recursive = true) {

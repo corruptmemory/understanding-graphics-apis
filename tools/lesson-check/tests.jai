@@ -1,0 +1,152 @@
+// Tests for the lesson checker. Run with: first.jai - test tools/lesson-check
+//
+// Table-driven: GOOD is one well-formed lesson; every case mutates it with one replace and
+// names the findings it expects. No GPU, no Gfx_Test.
+
+#import "Basic";
+#import "String";
+
+#load "check.jai";
+
+Case :: struct { name: string; from: string; to: string; expect: [] string; }   // expect: one substring per expected finding
+
+CASES :: Case.[
+    .{"good",                       "", "", .[]},
+    .{"four-endnotes",              "<!-- endnote slot -->", "<details class=\"endnote\"><summary>x</summary>a</details><details class=\"endnote\"><summary>y</summary>b</details>", .["4 endnotes, at most 3"]},
+    .{"open-endnote",               "<details class=\"endnote\">", "<details class=\"endnote\" open>", .["endnote is open by default", "endnote is open by default"]},   // both endnotes match
+    .{"snippet-neither",            "data-src=\"src/sample.jai:3\"", "", .["snippet has neither data-src nor data-illustrative"]},
+    .{"snippet-line-past-end",      "src/sample.jai:3", "src/sample.jai:99", .["snippet 'src/sample.jai:99': line is past the end"]},
+    .{"snippet-missing-file",       "src/sample.jai:3", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
+    .{"illustrative-with-src",      "data-illustrative=\"d3d12\"", "data-illustrative=\"d3d12\" data-src=\"src/sample.jai:1\"", .["illustrative snippet carries data-src"]},
+    .{"step-without-box",           "data-step=\"s2\"", "data-step=\"s1\"", .["step 's2' has no box in the spine"]},
+    .{"box-unknown-step",           "data-step=\"s2\"", "data-step=\"nope\"", .["box refers to unknown step 'nope'", "step 's2' has no box in the spine"]},
+    .{"duplicate-step-id",          "id=\"s2\"", "id=\"s1\"", .["duplicate step id 's1'", "box refers to unknown step 's2'", "no element with id 's2'"]},
+    .{"two-outcomes",               "<li>outcome three</li>", "", .["outcomes has 2 items, want 3"]},
+    .{"sidebar-no-term",            " data-term=\"Command buffer\"", "", .["sidebar lacks data-term"]},
+    .{"sidebar-no-dl",              "<dl class=\"elsewhere\">", "<dl>", .["sidebar has no dl.elsewhere"]},
+    .{"lanes-out-of-order",         "data-lane=\"driver\"", "data-lane=\"gpu\"", .["lanes are [cpu, gpu, gpu], want cpu, driver, gpu"]},
+    .{"no-sources",                 "<section class=\"sources\">", "<section class=\"refs\">", .["no sources section"]},
+    .{"no-next",                    "<p class=\"next\">", "<p class=\"last\">", .["no next link"]},
+    .{"broken-link",                "class=\"see\" href=\"neighbour.html\"", "class=\"see\" href=\"nowhere.html\"", .["link target does not exist: nowhere.html"]},
+    .{"broken-fragment",            "href=\"#s2\"", "href=\"#ghost\"", .["no element with id 'ghost'"]},
+    .{"no-noscript",                "<noscript>", "<nonscript>", .["no noscript note"]},
+    .{"no-article",                 "<article class=\"lesson\"", "<article class=\"page\"", .["no <article class=\"lesson\">"]},
+];
+
+Resolve_Case :: struct { page: string; href: string; want: string; }
+
+RESOLVE_CASES :: Resolve_Case.[
+    .{"lessons/vulkan/03.html", "../assets/lesson.css",             "lessons/assets/lesson.css"},
+    .{"lessons/vulkan/03.html", "./04.html",                        "lessons/vulkan/04.html"},
+    .{"index.html",             "lessons/concept-map.html",         "lessons/concept-map.html"},
+    .{"lessons/vulkan/03.html", "../../vulkan/exercise-3/README.md", "vulkan/exercise-3/README.md"},
+];
+
+PAGE_PATH :: "lessons/vulkan/03-sample.html";
+
+GOOD :: #string HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sample lesson</title>
+<link rel="stylesheet" href="neighbour.html">
+<script src="neighbour.html" defer></script>
+</head>
+<body>
+<article class="lesson" data-track="vulkan" data-number="3">
+<header class="lesson-head">
+<h1>Sample lesson</h1>
+<a class="exercise" href="neighbour.html">exercise-3</a>
+</header>
+<noscript>Without scripts the panel does not follow the text.</noscript>
+<ul class="outcomes">
+<li>outcome one</li>
+<li>outcome two</li>
+<li>outcome three</li>
+</ul>
+<section class="step" id="s1">
+<h2>1. First</h2>
+<p>See <a class="see" href="neighbour.html">the neighbour</a> and <a href="#s2">step two</a>.</p>
+<pre class="snippet" data-src="src/sample.jai:3"><code>x := 1;</code></pre>
+<aside class="sidebar" id="sb-cb" data-term="Command buffer">
+<dl class="elsewhere"><dt>D3D12</dt><dd>command list</dd><dt>Metal</dt><dd>command buffer</dd></dl>
+<pre class="snippet" data-illustrative="d3d12"><code>list->Close();</code></pre>
+</aside>
+</section>
+<section class="step" id="s2">
+<h2>2. Second</h2>
+<p>More prose.</p>
+</section>
+<details class="endnote"><summary>One</summary>a</details>
+<details class="endnote"><summary>Two</summary>b</details>
+<!-- endnote slot -->
+<div class="where">
+<div class="strip"></div>
+<aside class="spine">
+<h2 class="spine-title">Where is this happening?</h2>
+<div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar"><button class="box" data-step="s1">first</button><span class="arrow" data-step="s1">→</span></div></div>
+<div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar"><button class="box" data-step="s2">second</button></div></div>
+<div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar"></div></div>
+</aside>
+</div>
+<section class="sources"><h2>Sources</h2><ul><li>A source</li></ul></section>
+<p class="next"><a href="neighbour.html">Now do exercise 3</a></p>
+</article>
+</body>
+</html>
+HTML
+
+passed := 0;
+failed := 0;
+
+report :: (name: string, ok: bool, detail: string) {
+    if ok {
+        print("PASS %\n", name);
+        passed += 1;
+    } else {
+        print("FAIL %: %\n", name, detail);
+        failed += 1;
+    }
+}
+
+describe :: (findings: [] Finding) -> string {
+    b: String_Builder;
+    for findings  print_to_builder(*b, "\n    %:%: %", it.path, it.line, it.message);
+    return builder_to_string(*b);
+}
+
+main :: () {
+    fixtures := tprint("%fixtures/", #filepath);
+
+    for c: CASES {
+        html := GOOD;
+        if c.from  html = replace(GOOD, c.from, c.to);
+        findings := check_lesson(html, PAGE_PATH, fixtures);
+
+        ok := findings.count == c.expect.count;
+        for want: c.expect {
+            matched := false;
+            for findings  if contains(it.message, want) { matched = true; break; }
+            if !matched  ok = false;
+        }
+        report(c.name, ok, tprint("% findings, want %: %", findings.count, c.expect.count, describe(findings)));
+    }
+
+    for RESOLVE_CASES {
+        got := resolve_relative(it.page, it.href);
+        report(tprint("resolve % + %", it.page, it.href), got == it.want, tprint("got '%', want '%'", got, it.want));
+    }
+
+    report("line_of start",       line_of("a\nb\nc", 0) == 1, tprint("got %", line_of("a\nb\nc", 0)));
+    report("line_of second line", line_of("a\nb\nc", 2) == 2, tprint("got %", line_of("a\nb\nc", 2)));
+    report("line_of third line",  line_of("a\nb\nc", 4) == 3, tprint("got %", line_of("a\nb\nc", 4)));
+
+    js_bad  := check_js("const x = fetch('a')", "spine.js");
+    js_good := check_js("const y = 1", "spine.js");
+    report("check_js flags fetch",   js_bad.count == 1 && contains(js_bad[0].message, "fetch("), describe(js_bad));
+    report("check_js passes plain",  js_good.count == 0, describe(js_good));
+
+    print("% passed, % failed\n", passed, failed);
+    if failed > 0  exit(1);
+}
