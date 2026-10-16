@@ -57,6 +57,20 @@ Test_Case :: struct {
     needs_display            := false;  // SKIP when DISPLAY is unset
 }
 
+// Read a .spv produced by `first.jai - shaders` as SPIR-V words. Meant for compile time:
+//     CODE :: #run load_spirv(tprint("%.build/spv/<file>.spv", #filepath));
+// so the binary carries its shaders and never looks for files at run time.
+load_spirv :: (path: string) -> [] u32 {
+    data, ok := read_entire_file(path);
+    assert(ok, "load_spirv: could not read '%' (run `first.jai - shaders <target>` first)", path);
+    assert(data.count % 4 == 0, "load_spirv: '%' is % bytes, not a multiple of 4", path, data.count);
+    words: [] u32;
+    words.data  = cast(*u32) data.data;
+    words.count = data.count / 4;
+    assert(words.count > 0 && words[0] == 0x07230203, "load_spirv: '%' does not start with the SPIR-V magic number", path);
+    return words;
+}
+
 #load "device.jai";
 #load "target.jai";
 #load "runner.jai";

@@ -4,6 +4,8 @@
 #import "File_Utilities";
 #import "Gfx_Test";
 #import "Vulkan";
+#import "Window_Creation";
+#import "X11";
 
 // ---- pure functions ------------------------------------------------------------------
 
@@ -111,6 +113,32 @@ capture_creates_parent_directory :: (ctx: *Gfx_Context) -> bool {
     return save_png(p, path) && file_exists(path);
 }
 
+// ---- the shader path and the X11 surface -------------------------------------------
+
+CHECK_VERT :: #run load_spirv(tprint("%.build/spv/check.vert.spv", #filepath));
+
+shader_module_from_glslc_output :: (ctx: *Gfx_Context) -> bool {
+    ci: VkShaderModuleCreateInfo;
+    ci.codeSize = xx (CHECK_VERT.count * 4);
+    ci.pCode    = CHECK_VERT.data;
+    m: VkShaderModule;
+    if vkCreateShaderModule(ctx.device, *ci, null, *m) != .SUCCESS return false;
+    vkDestroyShaderModule(ctx.device, m, null);
+    return CHECK_VERT[0] == 0x07230203;
+}
+
+xlib_surface_is_presentable :: (ctx: *Gfx_Context) -> bool {
+    win := create_window(160, 120, "harness-check");
+    sci: VkXlibSurfaceCreateInfoKHR;
+    sci.dpy = x_global_display; sci.window = xx win;
+    surface: VkSurfaceKHR;
+    if vkCreateXlibSurfaceKHR(ctx.instance, *sci, null, *surface) != .SUCCESS return false;
+    defer vkDestroySurfaceKHR(ctx.instance, surface, null);
+    ok: VkBool32;
+    vkGetPhysicalDeviceSurfaceSupportKHR(ctx.physical_device, ctx.queue_family, surface, *ok);
+    return ok != 0;
+}
+
 CASES :: Test_Case.[
     .{name = "choose_discrete_over_integrated",       proc = choose_discrete_over_integrated},
     .{name = "choose_first_capable_without_discrete", proc = choose_first_capable_without_discrete},
@@ -123,6 +151,8 @@ CASES :: Test_Case.[
     .{name = "clear_color_reads_back",                proc = clear_color_reads_back},
     .{name = "expect_pixel_out_of_range_fails_cleanly", proc = expect_pixel_out_of_range_fails_cleanly},
     .{name = "capture_creates_parent_directory",      proc = capture_creates_parent_directory},
+    .{name = "shader_module_from_glslc_output",       proc = shader_module_from_glslc_output},
+    .{name = "xlib_surface_is_presentable",           proc = xlib_surface_is_presentable, needs_display = true},
 ];
 
 main :: () { exit(run_tests(CASES, get_command_line_arguments())); }

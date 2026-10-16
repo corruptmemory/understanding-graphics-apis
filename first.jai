@@ -20,6 +20,7 @@
 #import "File";
 #import "File_Utilities";
 #import "Process";
+#import "Sort";
 #import "String";
 
 ROOT :: #filepath;   // absolute, trailing slash
@@ -29,6 +30,7 @@ VERBS :: string.[
     "build <api>/<name>                 compile <api>/<name>/main.jai to build/<api>-<name> (shaders first)",
     "run <api>/<name> [args...]         build, then run the binary with args",
     "test <api>/<name> [args...]        compile tests.jai to build/<api>-<name>-tests and run it headlessly",
+    "test-all                           run every <api>/<name>/tests.jai under vulkan/, directx/, metal/",
     "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
     "regen-vulkan-bindings              refresh modules/Vulkan/source from /usr/include/vulkan and regenerate",
@@ -70,6 +72,9 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
         target, found := require_target(verb, rest);
         ok = found && build_target(target, "tests.jai", "-tests")
                    && run_binary(binary_path(target, "-tests"), array_view(rest, 1, rest.count - 1), TEST_ENV) == 0;
+
+      case "test-all";
+        ok = test_all();
 
       case "capture";
         target, found := require_target(verb, rest);
@@ -212,6 +217,31 @@ run_binary :: (path: string, args: [] string, env: [] string) -> s32 {
         return 1;
     }
     return result.exit_code;
+}
+
+// Every target with a tests.jai, in sorted order; one summary line each, then a total.
+test_all :: () -> bool {
+    targets: [..] string;
+    for api: string.["vulkan", "directx", "metal"] {
+        dir := tprint("%1%2", ROOT, api);
+        if !file_exists(dir)  continue;
+        for file_list(dir, recursive = true) {
+            if !ends_with(it, "/tests.jai")  continue;
+            rel := slice(it, ROOT.count, it.count - ROOT.count - "/tests.jai".count);   // "<api>/<name>"
+            array_add(*targets, copy_string(rel));
+        }
+    }
+    quick_sort(targets, compare_strings);
+
+    failed := 0;
+    for targets {
+        passed := build_target(it, "tests.jai", "-tests")
+               && run_binary(binary_path(it, "-tests"), .[], TEST_ENV) == 0;
+        print("%: %\n", it, ifx passed then "ok" else "FAILED");
+        if !passed  failed += 1;
+    }
+    print("% targets, % failed\n", targets.count, failed);
+    return failed == 0;
 }
 
 // Refresh the committed header snapshot, regenerate the bindings, then build and run smoke.jai.
