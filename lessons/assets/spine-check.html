@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spine-check</title>
+<link rel="stylesheet" href="lesson.css">
+<script src="spine.js"></script>
+</head>
+<body>
+<!-- The test page for spine.js: open it in any browser; the title becomes PASS or FAIL and the
+     results block lists every test. It is a fixture, not a lesson, so check-lessons skips it. -->
+<article class="lesson">
+<header class="lesson-head"><h1>spine-check</h1></header>
+
+<div class="where">
+  <div class="strip"></div>
+  <aside class="spine">
+    <h2 class="spine-title">Where is this happening?</h2>
+    <div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar">
+      <button class="box" data-step="a">alpha</button>
+      <button class="box" data-step="b">beta-cpu</button>
+    </div></div>
+    <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
+      <span class="arrow" data-step="b">→</span>
+      <button class="box" data-step="b">beta-driver</button>
+    </div></div>
+    <div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar">
+      <button class="box" data-step="c">gamma</button>
+    </div></div>
+  </aside>
+</div>
+
+<div class="body">
+  <pre id="results">running…</pre>
+  <section class="step" id="a" style="min-height: 900px"><h2>a</h2></section>
+  <section class="step" id="b" style="min-height: 900px"><h2>b</h2></section>
+  <section class="step" id="c" style="min-height: 900px"><h2>c</h2></section>
+  <div style="width: 420px">
+    <div class="lane" data-lane="cpu"><span class="lane-tag">narrow</span><div class="bar" id="narrow-bar">
+      <button class="box" data-step="x">first box label</button>
+      <button class="box" data-step="x">second box label</button>
+      <button class="box" data-step="x">third box label</button>
+      <button class="box" data-step="x">fourth box label</button>
+      <button class="box" data-step="x">fifth box label</button>
+      <button class="box" data-step="x">sixth box label</button>
+      <button class="box" data-step="x">seventh box label</button>
+      <button class="box" data-step="x">eighth box label</button>
+    </div></div>
+  </div>
+</div>
+</article>
+
+<script>
+// A reload restores the old scroll position and keeps the old #hash some time after DOMContentLoaded,
+// which would scroll the page out from under the click test; start clean, after load.
+history.scrollRestoration = 'manual';
+history.replaceState(null, '', location.pathname);
+window.addEventListener('load', async () => {
+  const out = [];
+  let passed = 0, failed = 0;
+  const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+  const $  = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+  const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  async function t(name, fn) {
+    try { await fn(); out.push('PASS ' + name); passed++; }
+    catch (e) { out.push('FAIL ' + name + ': ' + e.message); failed++; }
+  }
+  await frames();
+  window.scrollTo(0, 0);
+  await frames();
+
+  await t('pick chooses the last step above the line', () => {
+    assert(Spine.pick([-500, -100, 300], 0) === 1, 'want 1, got ' + Spine.pick([-500, -100, 300], 0));
+    assert(Spine.pick([50, 400, 900], 0) === 0, 'want 0 when nothing is above the line');
+    assert(Spine.pick([], 0) === 0, 'want 0 for no steps');
+  });
+
+  await t('init is idempotent', () => {
+    Spine.init(); Spine.init();
+    assert($$('.chip').length === 3, 'chips: ' + $$('.chip').length);
+    assert($$('.strip-toggle').length === 1, 'toggles: ' + $$('.strip-toggle').length);
+  });
+
+  await t('activate lights boxes and arrows', () => {
+    Spine.activate('b');
+    assert($$('.box.on').length === 2, 'box.on count ' + $$('.box.on').length);
+    assert($$('.arrow.on').length === 1, 'arrow.on count ' + $$('.arrow.on').length);
+    assert($('.spine').classList.contains('live'), 'spine lacks .live');
+    assert($('section#b').getAttribute('aria-current') === 'step', 'aria-current missing on #b');
+    assert($$('.box.on, .arrow.on').every(e => e.dataset.step === 'b'), 'something else is lit');
+    assert($$('[aria-current]').length === 1, 'aria-current on more than one section');
+  });
+
+  await t('activate updates chips', () => {
+    const chip = l => $('.chip[data-lane="' + l + '"]');
+    assert(chip('cpu').classList.contains('on') && chip('driver').classList.contains('on'), 'cpu and driver chips should be on');
+    assert(!chip('gpu').classList.contains('on'), 'gpu chip should be off');
+    const arrows = $$('.chip-arrow');
+    assert(arrows.length === 2, 'chip arrows: ' + arrows.length);
+    assert(arrows[0].classList.contains('on') && !arrows[1].classList.contains('on'), 'only the cpu→driver chip arrow should be on');
+    const sub = $('.chip.on .sub');
+    assert(sub && sub.textContent.trim().endsWith('beta-cpu'), 'sub label: ' + (sub && sub.textContent));
+    assert($$('.chip .sub').length === 1, 'only the first lit chip carries a sub label');
+  });
+
+  await t('activate animates when motion is allowed', () => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    Spine.activate('a');
+    // CSS transitions on .box also appear in getAnimations(), so count the stagger by its id
+    const n = $('.box.on').getAnimations().filter(a => a.id === 'spine-stagger').length;
+    assert(n === 1, 'stagger animations on the lit box: ' + n);
+  });
+
+  await t('box click jumps to its step', async () => {
+    $('.box[data-step="c"]').click();
+    assert(location.hash === '#c', 'hash is ' + location.hash);
+    await frames();
+    assert(Spine.state.active === 'c', 'active is ' + Spine.state.active);
+  });
+
+  await t('toggle expands and collapses', () => {
+    const btn = $('.strip-toggle');
+    Spine.setExpanded(true);
+    assert($('.where').classList.contains('expanded'), 'no .expanded');
+    assert(btn.getAttribute('aria-expanded') === 'true', 'aria-expanded ' + btn.getAttribute('aria-expanded'));
+    assert(btn.textContent.includes('collapse'), 'label ' + btn.textContent);
+    Spine.setExpanded(false);
+    assert(!$('.where').classList.contains('expanded'), '.expanded still set');
+    assert(btn.getAttribute('aria-expanded') === 'false' && btn.textContent.includes('expand'), 'collapsed label/aria');
+  });
+
+  await t('mode change resets expanded', () => {
+    Spine.setExpanded(true);
+    Spine.setMode('wide');
+    assert(Spine.state.expanded === false, 'state still expanded');
+    assert(!$('.where').classList.contains('expanded'), '.expanded still set');
+    Spine.setMode(matchMedia('(min-width: 1100px)').matches ? 'wide' : 'narrow');
+  });
+
+  await t('scrolling activates the step at the line', async () => {
+    window.scrollTo(0, 950);
+    await frames();
+    assert(Spine.state.active === 'b', 'active is ' + Spine.state.active + ' at scrollY ' + window.scrollY);
+  });
+
+  await t('lanes scroll, the page does not', () => {
+    const bar = $('#narrow-bar');
+    assert(bar.scrollWidth > bar.clientWidth, 'bar does not overflow: ' + bar.scrollWidth + ' <= ' + bar.clientWidth);
+    const de = document.documentElement;
+    assert(de.scrollWidth === de.clientWidth, 'page overflows: ' + de.scrollWidth + ' > ' + de.clientWidth);
+  });
+
+  out.push(passed + ' passed, ' + failed + ' failed');
+  document.getElementById('results').textContent = out.join('\n');
+  document.title = failed ? 'FAIL' : 'PASS';
+  window.scrollTo(0, 0);
+});
+</script>
+</body>
+</html>

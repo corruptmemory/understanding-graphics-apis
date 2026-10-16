@@ -198,9 +198,9 @@ mark { background: var(--mark); color: inherit; border-radius: .15rem; padding: 
 .arrow { flex: none; color: var(--fg-3); font-weight: 700; }
 .arrow.on { color: var(--accent); }
 
-/* the strip's chips, built by spine.js */
+/* the strip's chips, built by spine.js; a long sub label is cut short so the strip stays one line */
 .strip-label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-2); }
-.chip { cursor: default; }
+.chip { cursor: default; display: inline-block; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .chip .sub { color: var(--fg-3); font-weight: 400; }
 .chip-arrow { color: var(--fg-3); font-weight: 700; }
 .chip-arrow.on { color: var(--accent); }
