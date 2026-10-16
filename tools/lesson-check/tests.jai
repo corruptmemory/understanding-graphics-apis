@@ -44,6 +44,52 @@ RESOLVE_CASES :: Resolve_Case.[
 
 PAGE_PATH :: "lessons/vulkan/03-sample.html";
 
+// ---- the landing page ------------------------------------------------------------------
+
+Index_Case :: struct { name: string; from: string; to: string; pages: [] string; expect: [] string; }
+
+INDEX_CASES :: Index_Case.[
+    .{"index-good",                "", "", .["lessons/vulkan/00-a.html"], .[]},
+    .{"index-ignores-template",    "", "", .["lessons/vulkan/00-a.html", "lessons/_template.html"], .[]},
+    .{"index-unlinked-page",       "", "", .["lessons/vulkan/00-a.html", "lessons/vulkan/01-b.html"], .["lesson page not linked from index: lessons/vulkan/01-b.html"]},
+    .{"index-rows-out-of-order",   "data-number=\"1\">", "data-number=\"2\">", .["lessons/vulkan/00-a.html"], .["track 'vulkan' rows are [0, 2, 2], want 0..2 in order"]},
+    .{"index-done-without-link",   "data-state=\"todo\">lesson", "data-state=\"done\">lesson", .["lessons/vulkan/00-a.html"], .["row 2 says the lesson is done but links nothing"]},
+    .{"index-tracks-out-of-order", "data-track=\"directx\"", "data-track=\"metal\"", .["lessons/vulkan/00-a.html"], .["tracks are [vulkan, metal, metal], want vulkan, directx, metal"]},
+];
+
+GOOD_INDEX :: #string HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Understanding Graphics APIs</title>
+</head>
+<body class="site">
+<header class="site-head">
+<h1>Understanding Graphics APIs</h1>
+<p>Vulkan · DirectX · Metal, in Jai</p>
+</header>
+<section class="tracks">
+<article class="track" data-track="vulkan">
+<h2>Vulkan <span class="pill live">live · Linux/X11</span></h2>
+<div class="lrow" data-number="0"><span class="n">0</span><span class="t"><a href="lessons/vulkan/00-a.html">A</a></span><span class="marks"><span class="mark" data-state="done">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+<div class="lrow" data-number="1"><span class="n">1</span><span class="t">B</span><span class="marks"><span class="mark" data-state="current">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+<div class="lrow" data-number="2"><span class="n">2</span><span class="t">C</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+<div class="lrow" data-project="1"><span class="n">p1</span><span class="t">Project 1</span><span class="marks"><span class="mark" data-state="todo">brief</span></span></div>
+</article>
+<article class="track tbd" data-track="directx">
+<h2>DirectX 11 / 12 <span class="pill">TBD · Windows</span></h2>
+<p>Unlocked when this repo runs on Windows.</p>
+</article>
+<article class="track tbd" data-track="metal">
+<h2>Metal <span class="pill">TBD · macOS</span></h2>
+<p>Unlocked when this repo runs on macOS.</p>
+</article>
+</section>
+</body>
+</html>
+HTML
+
 GOOD :: #string HTML
 <!doctype html>
 <html lang="en">
@@ -123,6 +169,20 @@ main :: () {
         html := GOOD;
         if c.from  html = replace(GOOD, c.from, c.to);
         findings := check_lesson(html, PAGE_PATH, fixtures);
+
+        ok := findings.count == c.expect.count;
+        for want: c.expect {
+            matched := false;
+            for findings  if contains(it.message, want) { matched = true; break; }
+            if !matched  ok = false;
+        }
+        report(c.name, ok, tprint("% findings, want %: %", findings.count, c.expect.count, describe(findings)));
+    }
+
+    for c: INDEX_CASES {
+        html := GOOD_INDEX;
+        if c.from  html = replace(GOOD_INDEX, c.from, c.to);
+        findings := check_index(html, fixtures, c.pages);
 
         ok := findings.count == c.expect.count;
         for want: c.expect {

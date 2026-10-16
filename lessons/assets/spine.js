@@ -19,7 +19,7 @@
 
   var where, strip, spine, toggle;
   var steps = [], boxes = [], arrows = [], lanes = [], chips = {}, chipArrows = [];
-  var initialised = false, ticking = false;
+  var initialized = false, ticking = false;
 
   // Pure: the index of the last step whose top is at or above the reading line, else 0.
   function pick(tops, line) {
@@ -36,7 +36,7 @@
   }
 
   function init(root) {
-    if (initialised) return state;
+    if (initialized) return state;
     root  = root || document;
     where = root.querySelector('.where');
     if (!where) return state;
@@ -84,7 +84,7 @@
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
 
-    initialised = true;
+    initialized = true;
     update();
     return state;
   }

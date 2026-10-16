@@ -11,7 +11,7 @@
 <article class="lesson" data-track="template" data-number="0">
 
 <header class="lesson-head">
-  <p class="crumbs">Template · 0</p>
+  <p class="crumbs"><a href="../index.html">Understanding Graphics APIs</a> · Template · 0</p>
   <h1>Clear a target and read it back</h1>
   <p class="lesson-links"><a class="exercise" href="../vulkan/harness-check/tests.jai">harness-check ↗</a></p>
 </header>
@@ -47,7 +47,7 @@
 
 <p class="lead">This page is the template every lesson is copied from, and its content is real: the five steps
 below walk the harness's own self-check, <code>clear_color_reads_back</code>, which clears a 64 by 64 image to
-one colour on the GPU and reads the pixels back to the CPU. Every snippet is lifted from code in this
+one color on the GPU and reads the pixels back to the CPU. Every snippet is lifted from code in this
 repository that compiles and runs.</p>
 
 <p>After this you can:</p>
@@ -58,7 +58,7 @@ repository that compiles and runs.</p>
 </ul>
 
 <section class="step" id="s1">
-  <h2>1. Create an offscreen colour target the GPU can render into and the CPU can read back</h2>
+  <h2>1. Create an offscreen color target the GPU can render into and the CPU can read back</h2>
   <p><code>create_target</code> makes a <code>VkImage</code> with its memory and a view, plus a host-visible buffer
   for the readback. All of it is CPU-side bookkeeping: the driver allocates GPU memory and records the
   handles, but no GPU work is queued yet. <code>begin_commands</code> hands back a command buffer in the
@@ -69,7 +69,7 @@ cb := begin_commands(ctx);</code></pre>
 </section>
 
 <section class="step" id="s2">
-  <h2>2. Move the image into the layout the colour-attachment path wants</h2>
+  <h2>2. Move the image into the layout the color-attachment path wants</h2>
   <p>The image starts <code>UNDEFINED</code>. <code>transition_image</code> records a barrier that puts it into
   <code>COLOR_ATTACHMENT_OPTIMAL</code> before anything writes to it. Recording the barrier appends to the
   command buffer; the layout change itself happens on the GPU when the buffer runs. This is a barrier,
@@ -80,8 +80,8 @@ cb := begin_commands(ctx);</code></pre>
 </section>
 
 <section class="step" id="s3">
-  <h2>3. Record a clear with dynamic rendering: no render-pass object, just an attachment and a colour</h2>
-  <p>A <code>VkRenderingAttachmentInfo</code> names the view and asks for a <code>CLEAR</code> load with the colour
+  <h2>3. Record a clear with dynamic rendering: no render-pass object, just an attachment and a color</h2>
+  <p>A <code>VkRenderingAttachmentInfo</code> names the view and asks for a <code>CLEAR</code> load with the color
   0.25, 0.5, 0.75. <code>vkCmdBeginRendering</code> and <code>vkCmdEndRendering</code> bracket an empty pass, which is
   enough to make the clear happen. Still CPU memory: the driver is appending its own representation of
   these commands to the buffer.</p>
@@ -101,7 +101,7 @@ vkCmdEndRendering(cb);</code></pre>
       <dt>Metal</dt><dd><code>MTLRenderPassDescriptor</code> with <code>loadAction = .clear</code>, handed to a render command encoder</dd>
     </dl>
     <pre class="snippet" data-illustrative="d3d12"><code>list-&gt;OMSetRenderTargets(1, &amp;rtv, FALSE, nullptr);
-list-&gt;ClearRenderTargetView(rtv, colour, 0, nullptr);</code></pre>
+list-&gt;ClearRenderTargetView(rtv, color, 0, nullptr);</code></pre>
   </aside>
 </section>
 
@@ -118,7 +118,7 @@ list-&gt;ClearRenderTargetView(rtv, colour, 0, nullptr);</code></pre>
   <h2>5. Read the pixels back and check them against what the clear asked for</h2>
   <p><code>readback</code> records a copy from the image into the host-visible buffer, submits it, waits, and maps
   the buffer. The copy runs on the GPU; the map and the byte-for-byte comparison run on the CPU. The
-  expected values are the clear colour scaled to bytes: 64, 128, 191, 255.</p>
+  expected values are the clear color scaled to bytes: 64, 128, 191, 255.</p>
   <pre class="snippet" data-src="vulkan/harness-check/tests.jai:108"><code><mark>p := readback(ctx, *t, .COLOR_ATTACHMENT_OPTIMAL);</mark>
 return expect_pixel(p, 32, 32, 64, 128, 191, 255) &amp;&amp; expect_region_solid(p, 0, 0, 64, 64, 64, 128, 191, 255);</code></pre>
 </section>
@@ -129,7 +129,7 @@ return expect_pixel(p, 32, 32, 64, 128, 191, 255) &amp;&amp; expect_region_solid
     <summary>Loading instead of clearing</summary>
     <p>A common alternative is <code>VK_ATTACHMENT_LOAD_OP_LOAD</code>, which keeps whatever is in the image; useful
     for drawing over a previous frame or updating part of it; the cost is that the image must already be in
-    a defined layout with valid contents, so you own one more transition at initialisation.</p>
+    a defined layout with valid contents, so you own one more transition at initialization.</p>
   </details>
   <details class="endnote">
     <summary>A transfer queue for the copy</summary>

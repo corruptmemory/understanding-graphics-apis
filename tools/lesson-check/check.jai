@@ -256,6 +256,72 @@ check_links :: (html: string, page_path: string, root: string) -> [..] Finding {
     return findings;
 }
 
+// The landing page: every lesson page under a track directory is linked, each track's rows run
+// 0..N in order, a row that says its lesson is done links a page, the three tracks come in
+// order, and links resolve.
+check_index :: (html: string, root: string, pages: [] string) -> [..] Finding {
+    PATH :: "index.html";
+    findings: [..] Finding;
+
+    hrefs: [..] string;
+    at := 0;
+    while true {
+        tag, found := next_tag(html, at);
+        if !found  break;
+        at = tag.end;
+        if tag.name != "a"  continue;
+        href, has_href := attr(tag, "href");
+        if has_href  array_add(*hrefs, resolve_relative(PATH, href));
+    }
+    for page: pages {
+        if ends_with(page, "/_template.html")  continue;
+        if split(page, "/").count < 3          continue;   // only lessons/<track>/<file> pages must be listed
+        if !array_find(hrefs, page)  array_add(*findings, .{PATH, 0, tprint("lesson page not linked from index: %", page)});
+    }
+
+    tracks := collect(html, "article", "track");
+    names: [..] string;
+    for tracks {
+        name, _ := attr(it, "data-track");
+        array_add(*names, name);
+    }
+    if !(names.count == 3 && names[0] == "vulkan" && names[1] == "directx" && names[2] == "metal") {
+        start := ifx tracks.count > 0 then tracks[0].start else 0;
+        array_add(*findings, .{PATH, line_of(html, start), tprint("tracks are [%], want vulkan, directx, metal", join(..names, separator = ", "))});
+    }
+
+    for track: tracks {
+        name, _ := attr(track, "data-track");
+        body := inner(html, track);
+        base := body.data - html.data;   // offsets inside body, as offsets inside html
+        numbers: [..] string;
+        in_order := true;
+        for row: collect(body, "div", "lrow") {
+            n, has_n := attr(row, "data-number");
+            if !has_n  continue;   // a project row
+            value, parsed, remainder := string_to_int(n);
+            if !(parsed && remainder.count == 0 && value == numbers.count)  in_order = false;
+            array_add(*numbers, n);
+
+            row_body := inner(body, row);
+            done := false;
+            for mark: collect(row_body, "span", "mark") {
+                state, _ := attr(mark, "data-state");
+                if state == "done" && trim(inner(row_body, mark)) == "lesson"  done = true;
+            }
+            if done && collect(row_body, "a", "").count == 0 {
+                array_add(*findings, .{PATH, line_of(html, base + row.start), tprint("row % says the lesson is done but links nothing", n)});
+            }
+        }
+        if !in_order {
+            array_add(*findings, .{PATH, line_of(html, track.start), tprint("track '%' rows are [%], want 0..% in order", name, join(..numbers, separator = ", "), numbers.count - 1)});
+        }
+    }
+
+    for check_links(html, PATH, root)  array_add(*findings, it);
+    return findings;
+}
+
 // Pages run from file://, so the script may not load anything.
 check_js :: (js: string, path: string) -> [..] Finding {
     findings: [..] Finding;
@@ -321,11 +387,22 @@ check_all :: (root: string) -> (findings: [..] Finding, pages: int) {
         for check_lesson(html, it, root)  array_add(*findings, it);
     }
 
+    count := pages.count;
+
+    INDEX :: "index.html";
+    index_html, has_index := read_entire_file(tprint("%1%2", root, INDEX), log_errors = false);
+    if has_index {
+        for check_index(index_html, root, pages)  array_add(*findings, it);
+        count += 1;
+    } else {
+        array_add(*findings, .{INDEX, 0, "index.html is missing"});
+    }
+
     SPINE :: "lessons/assets/spine.js";
     js, ok := read_entire_file(tprint("%1%2", root, SPINE), log_errors = false);
     if ok  for check_js(js, SPINE)  array_add(*findings, it);
 
-    return findings, pages.count;
+    return findings, count;
 }
 
 // ---- the tag scanner ---------------------------------------------------------------------------

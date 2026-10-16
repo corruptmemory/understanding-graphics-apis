@@ -35,7 +35,8 @@ git-ignored.
 
 | Path                  | What                                                             |
 |-----------------------|------------------------------------------------------------------|
-| `lessons/`            | the HTML lessons (plan 2)                                        |
+| `index.html`          | the landing page: three tracks, the lesson list, how to build    |
+| `lessons/`            | the HTML lessons; `lessons/README.md` is the authoring guide     |
 | `vulkan/exercise-N/`  | one reinforcement exercise per lesson, with headless tests       |
 | `vulkan/project-N/`   | mini-projects graded against a rubric                            |
 | `modules/Vulkan/`     | the Jai distribution's Vulkan module regenerated from header 363 |

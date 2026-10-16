@@ -2,7 +2,8 @@
 
 Every lesson is one hand-authored HTML page that uses `assets/lesson.css` and `assets/spine.js`, works
 from `file://`, and follows the markup contract below. `first.jai - check-lessons` enforces the contract;
-run it before committing a page.
+run it before committing a page. Lesson text uses American spelling (color, initialization), since
+that is what the reader writes; Vulkan's own identifiers are quoted as they are.
 
 ## Start from the template
 
@@ -79,7 +80,7 @@ would be invisible to the glossary. Give each sidebar an `id` (`sb-<slug>`) so t
 ## Endnotes
 
 At most three per lesson, collapsed by default, each in the shape "a common alternative is X, which
-enables Y; useful for Z; the cost is setting up A and B at initialisation". Enough to know the detail
+enables Y; useful for Z; the cost is setting up A and B at initialization". Enough to know the detail
 exists, not the detail itself.
 
 ## The spine

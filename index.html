@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Understanding Graphics APIs</title>
+<link rel="stylesheet" href="lessons/assets/lesson.css">
+</head>
+<body class="site">
+
+<header class="site-head">
+  <h1>Understanding Graphics APIs</h1>
+  <p>Vulkan · DirectX · Metal, in Jai. A learning repo, not a reference: every lesson asks where a call
+  actually happens, on the CPU, in the driver, or on the GPU, and every exercise proves it with pixels and
+  zero validation errors.</p>
+  <p class="site-links"><a href="lessons/vulkan/deep-dives/README.md">Deep dives</a> · <a href="lessons/README.md">Authoring guide</a> · <a href="README.md">Building</a></p>
+</header>
+
+<section class="tracks">
+
+<article class="track" data-track="vulkan">
+  <h2>Vulkan <span class="pill live">live · Linux/X11</span></h2>
+  <div class="lrow" data-number="0"><span class="n">0</span><span class="t">The three layers</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="1"><span class="n">1</span><span class="t">Instance, device, queues</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="2"><span class="n">2</span><span class="t">Surface and swapchain under X11</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="3"><span class="n">3</span><span class="t">Shaders and pipelines</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="4"><span class="n">4</span><span class="t">Command buffers and submission</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-project="1"><span class="n">p1</span><span class="t">Project 1: several things, more than one command buffer, an order the picture must reveal</span><span class="marks"><span class="mark" data-state="todo">brief</span> · <span class="mark" data-state="todo">rubric</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="5"><span class="n">5</span><span class="t">Synchronization and the frame loop</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="6"><span class="n">6</span><span class="t">Memory and buffers</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="7"><span class="n">7</span><span class="t">Descriptors and push constants</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-project="2"><span class="n">p2</span><span class="t">Project 2: instancing, N copies of one mesh, each with its own orientation</span><span class="marks"><span class="mark" data-state="todo">brief</span> · <span class="mark" data-state="todo">rubric</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="8"><span class="n">8</span><span class="t">Images, samplers, textures, depth</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-number="9"><span class="n">9</span><span class="t">Capstone and the toolkit</span><span class="marks"><span class="mark" data-state="todo">lesson</span> · <span class="mark" data-state="todo">exercise</span> · <span class="mark" data-state="todo">tests</span></span></div>
+  <div class="lrow" data-project="3"><span class="n">p3</span><span class="t">Project 3: a capstone extension from a short menu</span><span class="marks"><span class="mark" data-state="todo">brief</span> · <span class="mark" data-state="todo">rubric</span> · <span class="mark" data-state="todo">tests</span></span></div>
+</article>
+
+<article class="track tbd" data-track="directx">
+  <h2>DirectX 11 / 12 <span class="pill">TBD · Windows</span></h2>
+  <p>Unlocked when this repo runs on Windows. Until then the Vulkan sidebars seed the mapping.
+  <a href="directx/README.md">The gate note.</a></p>
+</article>
+
+<article class="track tbd" data-track="metal">
+  <h2>Metal <span class="pill">TBD · macOS</span></h2>
+  <p>Unlocked when this repo runs on macOS. <a href="metal/README.md">The gate note.</a></p>
+</article>
+
+</section>
+
+<section class="howto">
+  <h2>Working an exercise</h2>
+  <p>Everything runs through the build program, from the repo root:</p>
+<pre><code>~/jai/jai/bin/jai-linux first.jai - build   vulkan/exercise-3   # compile the windowed program
+~/jai/jai/bin/jai-linux first.jai - run     vulkan/exercise-3   # build, then look at it
+~/jai/jai/bin/jai-linux first.jai - test    vulkan/exercise-3   # the headless gate: pixels and zero validation errors
+~/jai/jai/bin/jai-linux first.jai - capture vulkan/project-1    # a PNG of the last readback, for grading</code></pre>
+</section>
+
+</body>
+</html>

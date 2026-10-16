@@ -40,9 +40,9 @@
   }
 }
 
-[data-lane="cpu"]    { --lane-colour: var(--lane-cpu); }
-[data-lane="driver"] { --lane-colour: var(--lane-driver); }
-[data-lane="gpu"]    { --lane-colour: var(--lane-gpu); }
+[data-lane="cpu"]    { --lane-color: var(--lane-cpu); }
+[data-lane="driver"] { --lane-color: var(--lane-driver); }
+[data-lane="gpu"]    { --lane-color: var(--lane-gpu); }
 
 /* ---- type ---------------------------------------------------------------------------------- */
 
@@ -163,7 +163,7 @@ mark { background: var(--mark); color: inherit; border-radius: .15rem; padding: 
   gap: .5rem;
   margin: .35rem 0;
 }
-.lane-tag { font-weight: 700; font-size: .8rem; text-align: right; color: var(--lane-colour); }
+.lane-tag { font-weight: 700; font-size: .8rem; text-align: right; color: var(--lane-color); }
 .bar {
   display: flex;
   align-items: center;
@@ -172,7 +172,7 @@ mark { background: var(--mark); color: inherit; border-radius: .15rem; padding: 
   overflow-x: auto;
   padding: .3rem .5rem;
   border-radius: .4rem;
-  background: color-mix(in srgb, var(--lane-colour) 12%, transparent);
+  background: color-mix(in srgb, var(--lane-color) 12%, transparent);
 }
 
 .box, .chip {
@@ -189,8 +189,8 @@ mark { background: var(--mark); color: inherit; border-radius: .15rem; padding: 
   transition: opacity .2s, border-color .2s, background-color .2s;
 }
 .box.on, .chip.on {
-  border-color: var(--lane-colour);
-  background: color-mix(in srgb, var(--lane-colour) 18%, var(--bg));
+  border-color: var(--lane-color);
+  background: color-mix(in srgb, var(--lane-color) 18%, var(--bg));
   font-weight: 600;
 }
 .spine.live .box:not(.on) { opacity: .55; }
@@ -270,7 +270,11 @@ pre[data-illustrative]::before {
 .site-head { padding: 1.2rem 0 .8rem; border-bottom: 1px solid var(--line); margin-bottom: 1.2rem; }
 .site-head p { margin: .2rem 0; color: var(--fg-2); }
 
-.tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+/* the Vulkan card carries the lesson list, so it gets the wider column; one column below 1100 px */
+.tracks { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+@media (max-width: 1099.98px) {
+  .tracks { grid-template-columns: minmax(0, 1fr); }
+}
 .track {
   border: 1px solid var(--line);
   border-radius: .5rem;
