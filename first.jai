@@ -29,6 +29,7 @@ VERBS :: string.[
     "build <api>/<name>                 compile <api>/<name>/main.jai to build/<api>-<name> (shaders first)",
     "run <api>/<name> [args...]         build, then run the binary with args",
     "test <api>/<name> [args...]        compile tests.jai to build/<api>-<name>-tests and run it headlessly",
+    "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
     "regen-vulkan-bindings              refresh modules/Vulkan/source from /usr/include/vulkan and regenerate",
 ];
@@ -69,6 +70,13 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
         target, found := require_target(verb, rest);
         ok = found && build_target(target, "tests.jai", "-tests")
                    && run_binary(binary_path(target, "-tests"), array_view(rest, 1, rest.count - 1), TEST_ENV) == 0;
+
+      case "capture";
+        target, found := require_target(verb, rest);
+        path := ifx rest.count > 1 then rest[1] else tprint("%1build/%2.png", ROOT, binary_name(target, ""));
+        ok = found && build_target(target, "tests.jai", "-tests")
+                   && run_binary(binary_path(target, "-tests"), .["-capture", path], TEST_ENV) == 0;
+        if ok  print("capture: %\n", path);
 
       case "shaders";
         target, found := require_target(verb, rest);

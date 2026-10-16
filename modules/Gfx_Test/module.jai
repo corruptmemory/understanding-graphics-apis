@@ -10,7 +10,10 @@
 // read back into Pixels and asserted on, or written to a PNG with `first.jai - capture`.
 
 #import "Basic";
+#import "File";             // make_directory_if_it_does_not_exist
+#import "String";           // path_strip_filename
 #import "Vulkan";
+#import "stb_image_write";  // stbi_write_png
 
 Error_Recorder :: struct {
     errors:   int;
@@ -55,4 +58,5 @@ Test_Case :: struct {
 }
 
 #load "device.jai";
+#load "target.jai";
 #load "runner.jai";
