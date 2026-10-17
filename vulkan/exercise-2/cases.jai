@@ -120,22 +120,41 @@ swapchain_from_real_surface :: (ctx: *Gfx_Context) -> bool {
     if !ok  return false;
     defer destroy_swapchain(ctx, *sc);
 
-    // X11 reports the window's size as currentExtent (the window manager may have resized the window
-    // by now); the swapchain must have taken it. Only a surface that leaves the choice open gets the
-    // clamped request.
-    want := caps.currentExtent;
-    if want.width == 0xFFFF_FFFF  want = .{320, 200};
+    // X11 reports the window's size as currentExtent, and a tiling window manager may resize the
+    // window at any moment after it is mapped, including between this case's query and the creation.
+    // So the swapchain must have taken the size the surface reported either just before or just after
+    // creation. Only a surface that leaves the choice open (0xFFFFFFFF) gets the clamped request.
+    after: VkSurfaceCapabilitiesKHR;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, surface, *after);
+    before_extent := caps.currentExtent;
+    after_extent  := after.currentExtent;
+    if before_extent.width == 0xFFFF_FFFF  before_extent = .{320, 200};
+    if after_extent.width  == 0xFFFF_FFFF  after_extent  = .{320, 200};
+    same :: (a: VkExtent2D, b: VkExtent2D) -> bool { return a.width == b.width && a.height == b.height; }
     good := true;
     if sc.images.count < caps.minImageCount {
         print("    % images, the surface needs at least %\n", sc.images.count, caps.minImageCount);
         good = false;
     }
-    if sc.extent.width != want.width || sc.extent.height != want.height {
-        print("    extent %x%, want %x%\n", sc.extent.width, sc.extent.height, want.width, want.height);
+    if !same(sc.extent, before_extent) && !same(sc.extent, after_extent) {
+        print("    extent %x%, the surface reported %x% before creation and %x% after\n", sc.extent.width, sc.extent.height, before_extent.width, before_extent.height, after_extent.width, after_extent.height);
         good = false;
     }
     if sc.format != want_format {
         print("    format %, the chooser picked %\n", sc.format, want_format);
+        good = false;
+    }
+
+    // A resize makes present_loop recreate the swapchain; every view is new and the generation counter
+    // moves, which is how a buffer recorded against the old views knows to be re-recorded.
+    generation := swapchain_generation;
+    if !recreate_swapchain(ctx, *sc)  return false;
+    if swapchain_generation != generation + 1 {
+        print("    swapchain_generation % after a recreate, want %\n", swapchain_generation, generation + 1);
+        good = false;
+    }
+    if sc.handle == null || sc.views.count == 0 {
+        print("    recreate_swapchain left no swapchain\n");
         good = false;
     }
     return good;

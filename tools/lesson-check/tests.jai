@@ -26,9 +26,10 @@ CASES :: Case.[
     .{"good",                       "", "", .[]},
     .{"four-endnotes",              "<!-- endnote slot -->", "<details class=\"endnote\"><summary>x</summary>a</details><details class=\"endnote\"><summary>y</summary>b</details>", .["4 endnotes, at most 3"]},
     .{"open-endnote",               "<details class=\"endnote\">", "<details class=\"endnote\" open>", .["endnote is open by default", "endnote is open by default"]},   // both endnotes match
-    .{"snippet-neither",            "data-src=\"src/sample.jai:3\"", "", .["snippet has neither data-src nor data-illustrative"]},
-    .{"snippet-line-past-end",      "src/sample.jai:3", "src/sample.jai:99", .["snippet 'src/sample.jai:99': line is past the end"]},
-    .{"snippet-missing-file",       "src/sample.jai:3", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
+    .{"snippet-neither",            "data-src=\"src/sample.jai:5\"", "", .["snippet has neither data-src nor data-illustrative"]},
+    .{"snippet-line-past-end",      "src/sample.jai:5", "src/sample.jai:99", .["snippet 'src/sample.jai:99': line is past the end"]},
+    .{"snippet-missing-file",       "src/sample.jai:5", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
+    .{"snippet-text-differs",       "src/sample.jai:5", "src/sample.jai:6", .["snippet 'src/sample.jai:6': line 6 reads 'y := 2;', the snippet starts 'x := 1;'"]},
     .{"illustrative-with-src",      "data-illustrative=\"d3d12\"", "data-illustrative=\"d3d12\" data-src=\"src/sample.jai:1\"", .["illustrative snippet carries data-src"]},
     .{"step-without-box",           "data-step=\"s2\"", "data-step=\"s1\"", .["step 's2' has no box in the spine"]},
     .{"box-unknown-step",           "data-step=\"s2\"", "data-step=\"nope\"", .["box refers to unknown step 'nope'", "step 's2' has no box in the spine"]},
@@ -55,7 +56,7 @@ DIVE_CASES :: Case.[
     .{"dive-no-article",           "<article class=\"deep-dive page\"", "<article class=\"page\"", .["no <article class=\"deep-dive\">"]},
     .{"dive-no-lesson",            " data-lesson=\"0\"", "", .["deep-dive lacks data-lesson"]},
     .{"dive-crumb-not-a-lesson",   "href=\"../00-a.html\"", "href=\"../neighbour.html\"", .["deep dive has no crumb link to its lesson"]},   // exists, is not NN-*.html
-    .{"dive-snippet-missing-file", "src/sample.jai:3", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
+    .{"dive-snippet-missing-file", "src/sample.jai:10", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
     .{"dive-no-sources",           "<section class=\"sources\">", "<section class=\"refs\">", .["no sources section"]},
 ];
 
@@ -72,7 +73,7 @@ GOOD_DIVE :: #string HTML
 <p class="crumbs"><a href="../00-a.html">Lesson 0</a> · Deep dive</p>
 <h1>Sample deep dive</h1>
 <p>Prose.</p>
-<pre class="snippet" data-src="src/sample.jai:3"><code>x := 1;</code></pre>
+<pre class="snippet" data-src="src/sample.jai:10"><code>assert(x &lt; y);</code></pre>
 <section class="sources"><h2>Sources</h2><ul><li>A source</li></ul></section>
 </article>
 </body>
@@ -161,7 +162,8 @@ GOOD :: #string HTML
 <section class="step" id="s1">
 <h2>1. First</h2>
 <p>See <a class="see" href="neighbour.html">the neighbour</a> and <a href="#s2">step two</a>.</p>
-<pre class="snippet" data-src="src/sample.jai:3"><code>x := 1;</code></pre>
+<pre class="snippet" data-src="src/sample.jai:5"><code><mark>x := 1;</mark>
+y := 2;</code></pre>
 <aside class="sidebar" id="sb-cb" data-term="Command buffer">
 <dl class="elsewhere"><dt>D3D12</dt><dd>command list</dd><dt>Metal</dt><dd>command buffer</dd></dl>
 <pre class="snippet" data-illustrative="d3d12"><code>list->Close();</code></pre>

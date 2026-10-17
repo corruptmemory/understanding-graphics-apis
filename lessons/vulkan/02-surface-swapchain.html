@@ -30,7 +30,9 @@
       <button class="box" data-step="s5">record_clear</button>
     </div></div>
     <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
-      <button class="box" data-step="s1">loader: VkIcdSurfaceXlib</button>
+      <button class="box" data-step="s1">loader: VkIcdSurfaceXlib container</button>
+      <span class="arrow" data-step="s1">→</span>
+      <button class="box" data-step="s1">ICD: its own surface, on first use</button>
       <button class="box" data-step="s2">WSI: ask the X server (geometry, Present)</button>
       <button class="box" data-step="s3">WSI: allocate images, share them as DMA-BUFs</button>
       <button class="box" data-step="s4">WSI: wait for a free image</button>
@@ -66,15 +68,19 @@ swapchain rests on.</p>
 
 <section class="step" id="s1">
   <h2>1. A surface is the loader's handle to a window</h2>
-  <p><code>vkCreateXlibSurfaceKHR</code> never reaches a driver. The loader implements <code>VK_KHR_surface</code> and
-  its platform cousins itself: it allocates a small <code>VkIcdSurfaceXlib</code> record, an <code>Xlib</code> display
-  pointer and a window id behind a common header, and hands you its address as the
-  <code>VkSurfaceKHR</code>. That is the whole object. Every later surface query the ICD answers starts by
-  reading the display and window out of it, which is how one surface type can be shared by every driver
-  on the machine. The second call in <code>create_surface</code> asks whether the harness's queue family can
-  present to it; on this desktop the one family that can draw can also present, but the check is the
-  contract, not the assumption.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:30"><code>create_surface :: (ctx: *Gfx_Context, window: Window) -&gt; (surface: VkSurfaceKHR, ok: bool) {
+  <p><code>vkCreateXlibSurfaceKHR</code> is answered by the loader first. It implements <code>VK_KHR_surface</code>
+  and its platform cousins: it allocates a small <code>VkIcdSurfaceXlib</code> record, an <code>Xlib</code> display
+  pointer and a window id behind a common header, and hands you the address of that container as the
+  <code>VkSurfaceKHR</code>. What sits behind it depends on the driver. A driver on loader-driver interface
+  version 3 or newer may export its own <code>vkCreateXlibSurfaceKHR</code> and <code>vkDestroySurfaceKHR</code>, and
+  RADV does; for such a driver the loader creates the driver's own surface object lazily, on the first
+  surface query that reaches that ICD (<code>wsi_unwrap_icd_surface</code> in the loader's <code>wsi.c</code>), keeps
+  it in the container, and substitutes it on every later call. So one <code>VkSurfaceKHR</code> is a loader
+  container holding, per driver, that driver's surface; an older driver gets the container itself and
+  reads the display and window out of it. The second call in <code>create_surface</code> asks whether the
+  harness's queue family can present to it; on this desktop the one family that can draw can also
+  present, but the check is the contract, not the assumption.</p>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:32"><code>create_surface :: (ctx: *Gfx_Context, window: Window) -&gt; (surface: VkSurfaceKHR, ok: bool) {
     sci: VkXlibSurfaceCreateInfoKHR;
     sci.dpy    = x_global_display;
     sci.window = xx window;
@@ -126,7 +132,7 @@ choose_image_count :: (caps: VkSurfaceCapabilitiesKHR) -&gt; u32 {
   pixmap backed by the very same memory. That is what "shared with the presentation engine" means on
   this machine: two processes, one buffer, no copy. <code>vkGetSwapchainImagesKHR</code> gives you the
   <code>VkImage</code> handles, and the views are yours to create, which <code>given.jai</code> does right after.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:87"><code>sci: VkSwapchainCreateInfoKHR;
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:89"><code>sci: VkSwapchainCreateInfoKHR;
 sci.surface          = surface;
 sci.minImageCount    = count;
 sci.imageFormat      = format.format;
@@ -169,8 +175,8 @@ commandBuffer.present(drawable)</code></pre>
   one per swapchain image and signals the one belonging to the image it acquired; the validation layer
   reports a reused one as "may still be in use by VkSwapchainKHR". Lesson 5 opens these objects up
   properly.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:178"><code><mark>result := vkAcquireNextImageKHR(ctx.device, sc.handle, NEVER, acquired, null, *index);</mark></code></pre>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:230"><code>pi: VkPresentInfoKHR;
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:180"><code><mark>result := vkAcquireNextImageKHR(ctx.device, sc.handle, NEVER, acquired, null, *index);</mark></code></pre>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:232"><code>pi: VkPresentInfoKHR;
 pi.waitSemaphoreCount = 1;
 pi.pWaitSemaphores    = *done[index];
 pi.swapchainCount     = 1;
@@ -287,8 +293,9 @@ pi.pImageIndices      = *index;
         <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/VkPresentModeKHR.html">VkPresentModeKHR</a> (the three modes, FIFO required),
         <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/vkAcquireNextImageKHR.html">vkAcquireNextImageKHR</a> and
         <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/vkQueuePresentKHR.html">vkQueuePresentKHR</a>; "the presentable images of a swapchain are owned by the presentation engine".</li>
-    <li>Vulkan-Loader docs, <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md">LoaderDriverInterface.md</a>, "Handling KHR Surface Objects in WSI Extensions"; the <code>VkIcdSurfaceXlib</code> struct lives in Vulkan-Headers,
-        <a href="https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vk_icd.h">include/vulkan/vk_icd.h</a>.</li>
+    <li>Vulkan-Loader docs, <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md">LoaderDriverInterface.md</a>, "Handling KHR Surface Objects in WSI Extensions" (the loader's container, and the version 3 driver that creates its own), and
+        <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/loader/wsi.c">loader/wsi.c</a> (<code>wsi_unwrap_icd_surface</code>: the lazy per-driver creation); the <code>VkIcdSurfaceXlib</code> struct lives in Vulkan-Headers,
+        <a href="https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vk_icd.h">include/vulkan/vk_icd.h</a>. RADV's <code>libvulkan_radeon.so</code> exports <code>vk_icdNegotiateLoaderICDInterfaceVersion</code> and resolves <code>vkCreateXlibSurfaceKHR</code> and <code>vkDestroySurfaceKHR</code> (checked with <code>nm -D</code> and <code>strings</code>).</li>
     <li>Mesa, <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/vulkan/wsi/wsi_common_x11.c">src/vulkan/wsi/wsi_common_x11.c</a>: <code>x11_surface_get_capabilities</code> (geometry as the extent), <code>xcb_dri3_pixmap_from_buffers</code> (sharing), <code>xcb_present_pixmap</code> (presenting).</li>
     <li>xorgproto, <a href="https://gitlab.freedesktop.org/xorg/proto/xorgproto/-/blob/master/dri3proto.txt">dri3proto.txt</a> (<code>PixmapFromBuffers</code>) and <a href="https://gitlab.freedesktop.org/xorg/proto/xorgproto/-/blob/master/presentproto.txt">presentproto.txt</a> (<code>PresentPixmap</code>, the vblank target).</li>
     <li><a href="https://github.com/KhronosGroup/Vulkan-Docs/blob/main/appendices/VK_EXT_swapchain_maintenance1.adoc">VK_EXT_swapchain_maintenance1</a>, the extension appendix.</li>

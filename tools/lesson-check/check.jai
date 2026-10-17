@@ -176,7 +176,14 @@ check_snippets :: (html: string, page_path: string, root: string, findings: *[..
                 add(findings, page_path, html, it.start, tprint("snippet '%': could not read the file", src));
                 continue;
             }
-            if line < 1 || line > count_lines(text)  add(findings, page_path, html, it.start, tprint("snippet '%': line is past the end", src));
+            if line < 1 || line > count_lines(text) {
+                add(findings, page_path, html, it.start, tprint("snippet '%': line is past the end", src));
+                continue;
+            }
+            // The copied text must start at that line, or the pointer has drifted.
+            want := trim(line_at(text, line));
+            got  := trim(first_code_line(html, it));
+            if got != want  add(findings, page_path, html, it.start, tprint("snippet '%': line % reads '%', the snippet starts '%'", src, line, want, got));
         }
     }
 }
@@ -772,6 +779,35 @@ inner :: (html: string, tag: Tag) -> string {
         at = close + close_token.count;
     }
     return "";   // unreachable; the compiler does not treat `while true` as non-terminating
+}
+
+// The 1-based line of text, without its newline; "" past the end.
+line_at :: (text: string, line: int) -> string {
+    start := 0;
+    for 1..line - 1 {
+        nl := find_index_from_left(text, #char "\n", start);
+        if nl < 0  return "";
+        start = nl + 1;
+    }
+    end := find_index_from_left(text, #char "\n", start);
+    if end < 0  end = text.count;
+    return slice(text, start, end - start);
+}
+
+// The first line of a snippet's code as the reader sees it: marks stripped, entities unescaped.
+first_code_line :: (html: string, pre: Tag) -> string {
+    body  := inner(html, pre);
+    codes := collect(body, "code", "");
+    text  := ifx codes.count then inner(body, codes[0]) else body;
+    nl := find_index_from_left(text, #char "\n");
+    if nl >= 0  text = slice(text, 0, nl);
+    text = replace(text, "<mark>", "");
+    text = replace(text, "</mark>", "");
+    text = replace(text, "&lt;", "<");
+    text = replace(text, "&gt;", ">");
+    text = replace(text, "&quot;", "\"");
+    text = replace(text, "&amp;", "&");
+    return text;
 }
 
 count_lines :: (text: string) -> int {

@@ -82,7 +82,7 @@ const vec2 corners[3] = vec2[3](
 void main() {
     <mark>gl_Position = vec4(corners[gl_VertexIndex], 0.0, 1.0);</mark>
 }</code></pre>
-  <pre class="snippet" data-src="first.jai:225"><code>for file_list(shaders_dir) {
+  <pre class="snippet" data-src="first.jai:227"><code>for file_list(shaders_dir) {
     if !(ends_with(it, ".vert") || ends_with(it, ".frag") || ends_with(it, ".comp"))  continue;
 
     out := tprint("%1/%2.spv", out_dir, path_filename(it));

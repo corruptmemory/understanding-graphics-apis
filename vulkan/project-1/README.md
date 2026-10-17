@@ -45,9 +45,13 @@ The grader reads it next to the capture.
 - `SIMULTANEOUS_USE_BIT`: what it means, and why `present_loop`'s one-frame-in-flight fence makes it
   unnecessary here. `present_loop` waits for last frame's fence before it calls `scene_record` again,
   so nothing you appended last frame is still pending.
-- The static buffer is recorded for one image view. The tests render into one target; the windowed
-  program's swapchain has several images, each with its own view, so either keep one static buffer
-  per view (record on first use) or accept re-recording when the view changes. Say which in a comment.
+- The static buffer is recorded against one image view. The tests render into one target, so one
+  recording serves. The windowed program's swapchain has several images, each with its own view, and
+  a window resize makes `present_loop` recreate the swapchain, after which every view is new and a
+  buffer recorded against the old ones must not be submitted. `given.jai` keeps
+  `swapchain_generation`, bumped on every recreate: record one static buffer per view, remember the
+  generation it was recorded under, and free and re-record them all when the generation moves (view
+  handles can be reused, so the handle alone is not a safe key). Say what you did in a comment.
 
 ## Run and grade
 

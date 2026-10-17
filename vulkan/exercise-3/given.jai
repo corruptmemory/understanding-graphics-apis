@@ -23,7 +23,9 @@ Swapchain :: struct {
 // Called once per frame by present_loop with the acquired image, already in COLOR_ATTACHMENT_OPTIMAL.
 // It appends finished (ended) command buffers to cbs; present_loop submits them in order. The buffers
 // stay yours: before present_loop calls you for the next frame it has waited for this frame's fence,
-// so at that point you may free them, re-record them, or submit the same ones again.
+// so at that point you may free them, re-record them, or submit the same ones again. A buffer you keep
+// across frames references the view it was recorded with, and a resize makes every view new: compare
+// swapchain_generation with the value it had when you recorded, and re-record when it moved.
 Record_Proc :: #type (ctx: *Gfx_Context, image: VkImage, view: VkImageView, extent: VkExtent2D, frame: int, cbs: *[..] VkCommandBuffer);
 
 // The loader makes the surface object from the X11 display and window; no driver is involved yet.
@@ -278,8 +280,13 @@ recreate_swapchain :: (ctx: *Gfx_Context, sc: *Swapchain) -> bool {
         return false;
     }
     sc.* = fresh;
+    swapchain_generation += 1;
     return true;
 }
+
+// Bumped by every recreate_swapchain. A command buffer recorded against a swapchain's views is valid
+// only while this still holds the value it had at recording time; the images and views are new after.
+swapchain_generation: int;
 
 // ---- lesson 2's choices, finished --------------------------------------------------------------
 

@@ -10,8 +10,8 @@
 SHAPES_VERT :: #run load_spirv(tprint("%.build/spv/shapes.vert.spv", #filepath));
 SHAPES_FRAG :: #run load_spirv(tprint("%.build/spv/shapes.frag.spv", #filepath));
 
-// Add what else the scene needs: the view the static buffer was recorded for, a table of static
-// buffers per view, the last extent, ...
+// Add what else the scene needs: the view the static buffer was recorded for (or a table of static
+// buffers per view), the swapchain_generation it was recorded under, the last extent, ...
 Scene :: struct {
     pipeline:   Pipeline;
     static_cb:  VkCommandBuffer;   // recorded once, submitted every frame (begin without ONE_TIME_SUBMIT_BIT)
@@ -30,7 +30,9 @@ scene_init :: (ctx: *Gfx_Context, color_format: VkFormat) -> (scene: Scene, ok: 
 // then the per-frame one re-recorded for this frame, with something in it that moves with `frame`.
 // The image is already in COLOR_ATTACHMENT_OPTIMAL. The first buffer clears, the second loads and
 // starts with attachment_barrier(cb, image). present_loop (and the tests) have waited for last
-// frame's fence before calling this, so re-recording the dynamic buffer is safe.
+// frame's fence before calling this, so re-recording the dynamic buffer is safe. When
+// swapchain_generation differs from the one your static buffer was recorded under, the window was
+// resized and every view is new: free and re-record it before appending it.
 scene_record :: (ctx: *Gfx_Context, scene: *Scene, image: VkImage, view: VkImageView, extent: VkExtent2D, frame: int, cbs: *[..] VkCommandBuffer) {
     // TODO
 }
