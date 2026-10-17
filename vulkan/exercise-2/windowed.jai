@@ -6,11 +6,14 @@
 #import "Vulkan";
 #import "Window_Creation";
 
+frame_cb: VkCommandBuffer;   // last frame's buffer; present_loop has waited for its fence by the time record_frame runs again
+
 record_frame :: (ctx: *Gfx_Context, image: VkImage, view: VkImageView, extent: VkExtent2D, frame: int, cbs: *[..] VkCommandBuffer) {
-    cb := begin_commands(ctx);
-    record_clear(cb, view, extent, .[0.1, 0.1, 0.3, 1.0]);
-    vkEndCommandBuffer(cb);
-    array_add(cbs, cb);
+    if frame_cb  vkFreeCommandBuffers(ctx.device, ctx.command_pool, 1, *frame_cb);
+    frame_cb = begin_commands(ctx);
+    record_clear(frame_cb, view, extent, .[0.1, 0.1, 0.3, 1.0]);
+    vkEndCommandBuffer(frame_cb);
+    array_add(cbs, frame_cb);
 }
 
 main :: () {

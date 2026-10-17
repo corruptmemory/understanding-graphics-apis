@@ -74,7 +74,7 @@ swapchain rests on.</p>
   on the machine. The second call in <code>create_surface</code> asks whether the harness's queue family can
   present to it; on this desktop the one family that can draw can also present, but the check is the
   contract, not the assumption.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:29"><code>create_surface :: (ctx: *Gfx_Context, window: Window) -&gt; (surface: VkSurfaceKHR, ok: bool) {
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:30"><code>create_surface :: (ctx: *Gfx_Context, window: Window) -&gt; (surface: VkSurfaceKHR, ok: bool) {
     sci: VkXlibSurfaceCreateInfoKHR;
     sci.dpy    = x_global_display;
     sci.window = xx window;
@@ -126,7 +126,7 @@ choose_image_count :: (caps: VkSurfaceCapabilitiesKHR) -&gt; u32 {
   pixmap backed by the very same memory. That is what "shared with the presentation engine" means on
   this machine: two processes, one buffer, no copy. <code>vkGetSwapchainImagesKHR</code> gives you the
   <code>VkImage</code> handles, and the views are yours to create, which <code>given.jai</code> does right after.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:86"><code>sci: VkSwapchainCreateInfoKHR;
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:87"><code>sci: VkSwapchainCreateInfoKHR;
 sci.surface          = surface;
 sci.minImageCount    = count;
 sci.imageFormat      = format.format;
@@ -169,8 +169,8 @@ commandBuffer.present(drawable)</code></pre>
   one per swapchain image and signals the one belonging to the image it acquired; the validation layer
   reports a reused one as "may still be in use by VkSwapchainKHR". Lesson 5 opens these objects up
   properly.</p>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:174"><code><mark>result := vkAcquireNextImageKHR(ctx.device, sc.handle, NEVER, acquired, null, *index);</mark></code></pre>
-  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:224"><code>pi: VkPresentInfoKHR;
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:178"><code><mark>result := vkAcquireNextImageKHR(ctx.device, sc.handle, NEVER, acquired, null, *index);</mark></code></pre>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:230"><code>pi: VkPresentInfoKHR;
 pi.waitSemaphoreCount = 1;
 pi.pWaitSemaphores    = *done[index];
 pi.swapchainCount     = 1;

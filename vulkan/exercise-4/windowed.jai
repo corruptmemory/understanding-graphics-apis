@@ -7,18 +7,24 @@
 #import "Window_Creation";
 
 the_pipeline: Pipeline;
+frame_cbs: [..] VkCommandBuffer;   // last frame's buffers; present_loop has waited for their fence by the time record_frame runs again
 
 record_frame :: (ctx: *Gfx_Context, image: VkImage, view: VkImageView, extent: VkExtent2D, frame: int, cbs: *[..] VkCommandBuffer) {
+    if frame_cbs.count  vkFreeCommandBuffers(ctx.device, ctx.command_pool, xx frame_cbs.count, frame_cbs.data);
+    frame_cbs.count = 0;
+
     all := begin_buffer(ctx);                                     // clears, then every triangle in order
     if !all  return;
     record_scene(all, view, extent, the_pipeline, .[0, 1, 2, 3], clear = true);
     array_add(cbs, all);
+    array_add(*frame_cbs, all);
 
     top := begin_buffer(ctx);                                     // loads, then one triangle over the rest
     if !top  return;
     attachment_barrier(top, image);
     record_scene(top, view, extent, the_pipeline, .[(frame / 60) % 4], clear = false);
     array_add(cbs, top);
+    array_add(*frame_cbs, top);
 }
 
 main :: () {

@@ -21,8 +21,9 @@ Swapchain :: struct {
 }
 
 // Called once per frame by present_loop with the acquired image, already in COLOR_ATTACHMENT_OPTIMAL.
-// It appends finished (ended) command buffers to cbs; present_loop submits them in order and frees
-// them once the frame's fence says the GPU is done.
+// It appends finished (ended) command buffers to cbs; present_loop submits them in order. The buffers
+// stay yours: before present_loop calls you for the next frame it has waited for this frame's fence,
+// so at that point you may free them, re-record them, or submit the same ones again.
 Record_Proc :: #type (ctx: *Gfx_Context, image: VkImage, view: VkImageView, extent: VkExtent2D, frame: int, cbs: *[..] VkCommandBuffer);
 
 // The loader makes the surface object from the X11 display and window; no driver is involved yet.
@@ -138,8 +139,9 @@ destroy_swapchain :: (ctx: *Gfx_Context, sc: *Swapchain) {
 // The windowed loop, one frame in flight: wait for last frame's fence, acquire, transition the image
 // to COLOR_ATTACHMENT_OPTIMAL, let `record` append its buffers, transition to PRESENT_SRC_KHR, submit
 // everything at once, present. Stops after `frames` frames or on a QUIT event. A resize makes the
-// swapchain out of date; the loop recreates it from the same surface and carries on. Lesson 5 opens up
-// the fence, the semaphores and frames in flight.
+// swapchain out of date; the loop recreates it from the same surface and carries on. The two transition
+// buffers are the loop's own and are freed after the fence; the record proc's buffers are its own.
+// Lesson 5 opens up the fence, the semaphores and frames in flight.
 //
 // Two kinds of semaphore: one `acquired`, reused every frame, because the fence proves last frame's
 // submit (which waited on it) is done; and one `done` per swapchain image, because the present that
@@ -156,7 +158,8 @@ present_loop :: (ctx: *Gfx_Context, sc: *Swapchain, frames: int, record: Record_
     acquired: VkSemaphore;
     vkCreateSemaphore(ctx.device, *semci, null, *acquired);   // signaled when the image is ours
     done := make_semaphores(ctx, sc.images.count);           // signaled when our rendering of that image is done
-    cbs: [..] VkCommandBuffer;
+    cbs: [..] VkCommandBuffer;   // everything submitted this frame, in order: pre, the proc's, post
+    own: [..] VkCommandBuffer;   // the two transition buffers, ours to free
 
     frame := 0;
     while frame < frames {
@@ -165,9 +168,10 @@ present_loop :: (ctx: *Gfx_Context, sc: *Swapchain, frames: int, record: Record_
         for events_this_frame  if it.type == .QUIT  quit = true;
         if quit  break;
 
-        // Last frame's GPU work must be finished before its buffers are freed and the fence reused.
+        // Last frame's GPU work must be finished before its buffers are touched and the fence reused.
         vkWaitForFences(ctx.device, 1, *fence, VK_TRUE, NEVER);
-        if cbs.count  vkFreeCommandBuffers(ctx.device, ctx.command_pool, xx cbs.count, cbs.data);
+        if own.count  vkFreeCommandBuffers(ctx.device, ctx.command_pool, xx own.count, own.data);
+        own.count = 0;
         cbs.count = 0;
 
         index: u32;
@@ -190,6 +194,7 @@ present_loop :: (ctx: *Gfx_Context, sc: *Swapchain, frames: int, record: Record_
                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         vkEndCommandBuffer(pre);
         array_add(*cbs, pre);
+        array_add(*own, pre);
 
         record(ctx, sc.images[index], sc.views[index], sc.extent, frame, *cbs);
 
@@ -199,6 +204,7 @@ present_loop :: (ctx: *Gfx_Context, sc: *Swapchain, frames: int, record: Record_
                          VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE);
         vkEndCommandBuffer(post);
         array_add(*cbs, post);
+        array_add(*own, post);
 
         infos := NewArray(cbs.count, VkCommandBufferSubmitInfo,, temp);
         for cbs  infos[it_index].commandBuffer = it;
@@ -241,7 +247,8 @@ present_loop :: (ctx: *Gfx_Context, sc: *Swapchain, frames: int, record: Record_
     }
 
     vkDeviceWaitIdle(ctx.device);
-    if cbs.count  vkFreeCommandBuffers(ctx.device, ctx.command_pool, xx cbs.count, cbs.data);
+    if own.count  vkFreeCommandBuffers(ctx.device, ctx.command_pool, xx own.count, own.data);
+    array_free(own);
     array_free(cbs);
     vkDestroySemaphore(ctx.device, acquired, null);
     destroy_semaphores(ctx, done);
