@@ -362,8 +362,9 @@ panel uses, so its diagrams are the template for the rest.
   graphics, including whether PRIME offload needs a note in lesson 1.
 - Whether any lesson should reference game-bootstrap's code. Default: no; this
   repo stands alone.
-- RenderDoc is not installed on the desktop; lesson 9 needs it. It is in the
-  Arch repos (`renderdoc`), which is rung 1 of Jim's install policy.
+- RenderDoc 1.46 was installed on the desktop on 2026-10-16 from the Arch repos
+  (`renderdoc`, rung 1 of Jim's install policy): `qrenderdoc`, `renderdoccmd` and
+  `librenderdoc.so` are present, so lesson 9 can use it. The laptop still needs it.
 - **Expansion pack (Jim, 2026-10-16): an "advanced topics" section, later.** Not
   part of this lesson plan, but a known future addition once the core tracks
   exist. At least: asset pipelines (how models, textures and shaders get from
