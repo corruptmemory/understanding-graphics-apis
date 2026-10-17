@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vulkan 2 · Surface and swapchain under X11</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<script src="../assets/spine.js" defer></script>
+</head>
+<body>
+<article class="lesson" data-track="vulkan" data-number="2">
+
+<header class="lesson-head">
+  <p class="crumbs"><a href="../../index.html">Understanding Graphics APIs</a> · Vulkan · 2</p>
+  <h1>Surface and swapchain under X11</h1>
+  <p class="lesson-links"><a class="exercise" href="../../vulkan/exercise-2/README.md">exercise-2 ↗</a></p>
+</header>
+
+<div class="where">
+  <div class="strip"></div>
+  <aside class="spine">
+    <h2 class="spine-title">Where is this happening?</h2>
+    <div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar">
+      <button class="box" data-step="s1">vkCreateXlibSurfaceKHR</button>
+      <button class="box" data-step="s2">vkGetPhysicalDeviceSurfaceCapabilitiesKHR</button>
+      <button class="box" data-step="s3">vkCreateSwapchainKHR</button>
+      <button class="box" data-step="s4">vkAcquireNextImageKHR</button>
+      <span class="arrow" data-step="s4">→</span>
+      <button class="box" data-step="s4">vkQueuePresentKHR</button>
+      <button class="box" data-step="s5">record_clear</button>
+    </div></div>
+    <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
+      <button class="box" data-step="s1">loader: VkIcdSurfaceXlib</button>
+      <button class="box" data-step="s2">WSI: ask the X server (geometry, Present)</button>
+      <button class="box" data-step="s3">WSI: allocate images, share them as DMA-BUFs</button>
+      <button class="box" data-step="s4">WSI: wait for a free image</button>
+      <span class="arrow" data-step="s4">→</span>
+      <button class="box" data-step="s4">WSI: PresentPixmap</button>
+    </div></div>
+    <div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar">
+      <button class="box" data-step="s3">kernel: DMA-BUFs → X server pixmaps</button>
+      <button class="box" data-step="s4">GPU: clear</button>
+      <span class="arrow" data-step="s4">→</span>
+      <button class="box" data-step="s4">X server, compositor: scanout at vblank</button>
+      <button class="box" data-step="s5">GPU: clear → readback</button>
+    </div></div>
+    <p class="spine-legend">The highlight follows the step you are reading. Click a box to jump to its step.</p>
+  </aside>
+</div>
+
+<div class="body">
+<noscript><p class="notice">Scripts are off, so the panel does not follow the text. Everything else on this page works without them.</p></noscript>
+
+<p class="lead">Nothing in lessons 0 and 1 touched a screen. This lesson is about where pixels go: a surface is
+the loader's handle to an X11 window, a swapchain is a small set of images the presentation engine
+owns and lends you one at a time, and a frame is one trip around that loan. Mesa's window-system
+integration (WSI) code does the talking to the X server, and the exercise owns the four decisions a
+swapchain rests on.</p>
+
+<p>After this you can:</p>
+<ul class="outcomes">
+  <li>say who owns a swapchain image at each moment, and what acquire and present hand over;</li>
+  <li>explain FIFO, MAILBOX and IMMEDIATE in terms of the vertical blank and the compositor;</li>
+  <li>create a swapchain whose format, extent and image count come from the surface's capabilities rather than from assumptions.</li>
+</ul>
+
+<section class="step" id="s1">
+  <h2>1. A surface is the loader's handle to a window</h2>
+  <p><code>vkCreateXlibSurfaceKHR</code> never reaches a driver. The loader implements <code>VK_KHR_surface</code> and
+  its platform cousins itself: it allocates a small <code>VkIcdSurfaceXlib</code> record, an <code>Xlib</code> display
+  pointer and a window id behind a common header, and hands you its address as the
+  <code>VkSurfaceKHR</code>. That is the whole object. Every later surface query the ICD answers starts by
+  reading the display and window out of it, which is how one surface type can be shared by every driver
+  on the machine. The second call in <code>create_surface</code> asks whether the harness's queue family can
+  present to it; on this desktop the one family that can draw can also present, but the check is the
+  contract, not the assumption.</p>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:29"><code>create_surface :: (ctx: *Gfx_Context, window: Window) -&gt; (surface: VkSurfaceKHR, ok: bool) {
+    sci: VkXlibSurfaceCreateInfoKHR;
+    sci.dpy    = x_global_display;
+    sci.window = xx window;
+    surface: VkSurfaceKHR;
+    <mark>result := vkCreateXlibSurfaceKHR(ctx.instance, *sci, null, *surface);</mark></code></pre>
+  <aside class="sidebar" id="sb-surface" data-term="Surface">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd>no surface object: the <code>HWND</code> goes straight into <code>IDXGIFactory2::CreateSwapChainForHwnd</code></dd>
+      <dt>Metal</dt><dd>a <code>CAMetalLayer</code> set as the backing layer of an <code>NSView</code>; the layer is both the surface and the swapchain</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s2">
+  <h2>2. Ask the surface what it can do</h2>
+  <p>Three queries, all answered by the ICD's WSI code after a round trip to the X server:
+  <code>vkGetPhysicalDeviceSurfaceCapabilitiesKHR</code>, <code>…SurfaceFormatsKHR</code> and
+  <code>…SurfacePresentModesKHR</code>. Mesa's X11 path answers the capabilities with
+  <code>xcb_get_geometry</code>: <code>currentExtent</code>, <code>minImageExtent</code> and <code>maxImageExtent</code> all become
+  the window's current size. Four choices rest on these answers, and each has a trap. The format: prefer
+  <code>B8G8R8A8_SRGB</code>, which lets the hardware do the sRGB encode, but take the first entry when it is
+  not offered. The present mode: FIFO is the only one the specification requires, so it is the fallback.
+  The extent: X11 reports the window size, but Wayland reports <code>0xFFFFFFFF</code> to say "you decide", and
+  then the window size clamped to the min and max is the answer. The image count: one more than the
+  minimum, so there is always an image to draw into while another is on screen, clamped to
+  <code>maxImageCount</code>, which is zero when there is no maximum.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-2/exercise.jai:24"><code>choose_extent :: (caps: VkSurfaceCapabilitiesKHR, window_w: u32, window_h: u32) -&gt; VkExtent2D {
+    <mark>if caps.currentExtent.width != 0xFFFF_FFFF  return caps.currentExtent;</mark>
+    return .{clamp(window_w, caps.minImageExtent.width,  caps.maxImageExtent.width),
+             clamp(window_h, caps.minImageExtent.height, caps.maxImageExtent.height)};
+}
+
+// minImageCount + 1, clamped to maxImageCount when maxImageCount != 0 (zero means no maximum).
+choose_image_count :: (caps: VkSurfaceCapabilitiesKHR) -&gt; u32 {
+    count := caps.minImageCount + 1;
+    if caps.maxImageCount != 0 &amp;&amp; count &gt; caps.maxImageCount  count = caps.maxImageCount;
+    return count;
+}</code></pre>
+</section>
+
+<section class="step" id="s3">
+  <h2>3. The swapchain: images the presentation engine owns</h2>
+  <p>The generic rule first: the presentable images of a swapchain are owned by the presentation engine.
+  You never allocate them, you never free them, and you may touch one only between acquiring it and
+  presenting it. <code>vkCreateSwapchainKHR</code> is the ICD's call, and on Mesa the WSI code allocates each
+  image as ordinary GPU memory, exports it as a DMA-BUF file descriptor through the kernel, and hands
+  that descriptor to the X server with a DRI3 <code>PixmapFromBuffers</code> request, so the X server now has a
+  pixmap backed by the very same memory. That is what "shared with the presentation engine" means on
+  this machine: two processes, one buffer, no copy. <code>vkGetSwapchainImagesKHR</code> gives you the
+  <code>VkImage</code> handles, and the views are yours to create, which <code>given.jai</code> does right after.</p>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:86"><code>sci: VkSwapchainCreateInfoKHR;
+sci.surface          = surface;
+sci.minImageCount    = count;
+sci.imageFormat      = format.format;
+sci.imageColorSpace  = format.colorSpace;
+sci.imageExtent      = extent;
+sci.imageArrayLayers = 1;
+sci.imageUsage       = .COLOR_ATTACHMENT_BIT;
+sci.imageSharingMode = .EXCLUSIVE;
+sci.preTransform     = caps.currentTransform;
+sci.compositeAlpha   = .OPAQUE_BIT_KHR;
+sci.presentMode      = mode;
+sci.clipped          = VK_TRUE;
+<mark>result = vkCreateSwapchainKHR(ctx.device, *sci, null, *sc.handle);</mark></code></pre>
+  <aside class="sidebar" id="sb-swapchain" data-term="Swapchain">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>IDXGISwapChain3</code>: <code>GetBuffer(i)</code> for the images, <code>GetCurrentBackBufferIndex</code> instead of acquire, <code>Present</code>; the flip model (<code>DXGI_SWAP_EFFECT_FLIP_DISCARD</code>) is the one that shares buffers with the compositor</dd>
+      <dt>Metal</dt><dd><code>CAMetalLayer.nextDrawable()</code> hands you one of the layer's drawables, three by default; <code>present()</code> on the drawable gives it back</dd>
+    </dl>
+    <pre class="snippet" data-illustrative="metal"><code>guard let drawable = layer.nextDrawable() else { return }
+// ... encode into drawable.texture ...
+commandBuffer.present(drawable)</code></pre>
+  </aside>
+</section>
+
+<section class="step" id="s4">
+  <h2>4. Acquire, clear, present: the ownership round trip</h2>
+  <p>A frame is one loan. <code>vkAcquireNextImageKHR</code> asks the engine for an image you may use; on X11 the
+  WSI code waits until the server has reported one of the pixmaps idle, and the semaphore you pass is
+  signaled when the GPU may write into it. Your submit waits on that semaphore at the color-attachment
+  stage, draws, and signals a second semaphore; <code>vkQueuePresentKHR</code> waits on that one and issues a
+  Present <code>PresentPixmap</code> request to the X server, which puts the pixmap on screen at the next
+  vertical blank in FIFO mode, or sooner in the other modes. Under a compositor it is the compositor
+  that reaches the screen: the X server tells it a new pixmap is ready, and it composes your window
+  into its own frame. That is why <code>IMMEDIATE</code> may tear only without one, and why a compositor can add
+  a frame of latency you did not ask for.</p>
+  <p>Two semaphores, two lifetimes. The acquire semaphore is reused every frame, because the frame fence
+  proves the submit that waited on it has finished. The render-done semaphore is not covered by that
+  fence: the present that waits on it runs in the engine, after the fence. So <code>present_loop</code> keeps
+  one per swapchain image and signals the one belonging to the image it acquired; the validation layer
+  reports a reused one as "may still be in use by VkSwapchainKHR". Lesson 5 opens these objects up
+  properly.</p>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:174"><code><mark>result := vkAcquireNextImageKHR(ctx.device, sc.handle, NEVER, acquired, null, *index);</mark></code></pre>
+  <pre class="snippet" data-src="vulkan/exercise-2/given.jai:224"><code>pi: VkPresentInfoKHR;
+pi.waitSemaphoreCount = 1;
+pi.pWaitSemaphores    = *done[index];
+pi.swapchainCount     = 1;
+pi.pSwapchains        = *sc.handle;
+pi.pImageIndices      = *index;
+<mark>result = vkQueuePresentKHR(ctx.queue, *pi);</mark></code></pre>
+  <figure class="diagram">
+    <svg viewBox="0 0 660 330" role="img" aria-labelledby="fig2-title">
+      <title id="fig2-title">The swapchain ring: three images lent out and returned, the X server and compositor, and the vertical blank</title>
+      <defs>
+        <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <g data-lane="cpu">
+        <rect class="band" x="4" y="4" width="652" height="76"/>
+        <text class="band-tag" x="14" y="22">CPU · your frame</text>
+        <g class="node"><rect x="14" y="36" width="200" height="30"/><text x="114" y="56" text-anchor="middle">acquire → draw → present</text></g>
+        <text class="small" x="230" y="56">you hold exactly one image at a time</text>
+      </g>
+      <g data-lane="driver">
+        <rect class="band" x="4" y="88" width="652" height="114"/>
+        <text class="band-tag" x="14" y="106">driver · the engine's images</text>
+        <g class="node"><rect x="40" y="134" width="150" height="30"/><text x="115" y="154" text-anchor="middle">image 0 · yours</text></g>
+        <g class="node"><rect x="250" y="134" width="150" height="30"/><text x="325" y="154" text-anchor="middle">image 1 · queued</text></g>
+        <g class="node"><rect x="460" y="134" width="150" height="30"/><text x="535" y="154" text-anchor="middle">image 2 · on screen</text></g>
+        <path class="link hot" d="M115,132 L115,68"/>
+        <path class="link hot" d="M214,54 C 300,70 320,100 325,132"/>
+        <path class="link" d="M400,149 L458,149"/>
+        <path class="link" d="M535,166 C 535,190 115,190 115,166"/>
+        <text class="small" x="122" y="126">acquire</text>
+        <text class="small" x="336" y="126">present</text>
+        <text class="small" x="300" y="197">handed back when the next image goes on screen</text>
+      </g>
+      <g data-lane="gpu">
+        <rect class="band" x="4" y="210" width="652" height="116"/>
+        <text class="band-tag" x="14" y="228">GPU · kernel, X server, compositor, display</text>
+        <g class="node"><rect x="14" y="244" width="200" height="30"/><text x="114" y="264" text-anchor="middle">X server: three pixmaps</text></g>
+        <g class="node"><rect x="250" y="244" width="170" height="30"/><text x="335" y="264" text-anchor="middle">compositor</text></g>
+        <g class="node"><rect x="460" y="244" width="180" height="30"/><text x="550" y="264" text-anchor="middle">scanout at vblank</text></g>
+        <path class="link" d="M214,259 L248,259"/>
+        <path class="link" d="M420,259 L458,259"/>
+        <path class="link" d="M535,166 L535,242"/>
+        <text class="small" x="14" y="306">FIFO: one request leaves the queue per vblank · MAILBOX: the newest wins · IMMEDIATE: no waiting, may tear</text>
+      </g>
+    </svg>
+    <figcaption>The presentation engine owns the images; acquire lends one to you, present gives it back with a
+    request attached. On X11 the images are pixmaps the X server shares with you, and under a compositor it
+    is the compositor's frame, timed to the display's vertical blank, that finally carries your pixels.</figcaption>
+  </figure>
+  <aside class="sidebar" id="sb-present-mode" data-term="Present mode">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>Present(syncInterval, flags)</code>: an interval of 1 is FIFO, 0 with <code>DXGI_PRESENT_ALLOW_TEARING</code> is immediate; mailbox-like behavior comes from the flip model's latency settings</dd>
+      <dt>Metal</dt><dd><code>CAMetalLayer.displaySyncEnabled</code> (vsync on or off) and <code>maximumDrawableCount</code> stand in for the mode and the image count</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s5">
+  <h2>5. Headless: the same clear without a window</h2>
+  <p>The tests never open a window. The harness target from the template stands in for a swapchain image:
+  an image you own, in the same <code>COLOR_ATTACHMENT_OPTIMAL</code> layout the loop puts a swapchain image
+  into, and a readback instead of a present. <code>record_clear</code> is the piece the exercise owns, and it is
+  the same procedure the windowed program calls each frame: a dynamic-rendering instance over the whole
+  extent whose load operation is <code>CLEAR</code> with your color and whose store operation is <code>STORE</code>,
+  with no draw between begin and end. The two layout transitions around it, one in and one out, are
+  barriers; <code>given.jai</code> and the harness supply them, and lesson 5 opens them up.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-2/exercise.jai:39"><code>record_clear :: (cb: VkCommandBuffer, view: VkImageView, extent: VkExtent2D, color: [4] float) {
+    att: VkRenderingAttachmentInfo;
+    att.imageView   = view;
+    att.imageLayout = .COLOR_ATTACHMENT_OPTIMAL;
+    att.loadOp      = .CLEAR;
+    att.storeOp     = .STORE;
+    att.clearValue.color._float32 = color;
+
+    ri: VkRenderingInfo;
+    ri.renderArea           = .{.{0, 0}, extent};
+    ri.layerCount           = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments    = *att;
+    <mark>vkCmdBeginRendering(cb, *ri);</mark>
+    vkCmdEndRendering(cb);</code></pre>
+</section>
+
+<section class="endnotes">
+  <h2>Endnotes</h2>
+  <details class="endnote">
+    <summary><code>VK_EXT_swapchain_maintenance1</code></summary>
+    <p>A common alternative to one render-done semaphore per image is <code>VK_EXT_swapchain_maintenance1</code>,
+    which enables a fence per present through <code>VkSwapchainPresentFenceInfoEXT</code>; useful for knowing
+    exactly when a present has consumed its semaphore, so per-present objects can be recycled; the cost
+    is enabling the extension and its feature and attaching the fence info to every present.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>VK_KHR_xcb_surface</code></summary>
+    <p>A common alternative to the Xlib surface is <code>VK_KHR_xcb_surface</code>, which takes an
+    <code>xcb_connection_t</code> and an <code>xcb_window_t</code>, the protocol Mesa's WSI speaks underneath anyway; useful
+    when the window code is XCB; the cost is a second surface path and the XCB connection plumbing in
+    the program.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>imageUsage</code> with <code>TRANSFER_DST_BIT</code></summary>
+    <p>A common alternative to rendering into the swapchain image is asking for <code>TRANSFER_DST_BIT</code> in
+    <code>imageUsage</code> and blitting a rendered image into it; useful when the render format or size differs
+    from what the surface offers; the cost is a blit and two more layout transitions per frame.</p>
+  </details>
+</section>
+
+<p class="deep-dive">Deep dives: <a href="deep-dives/README.md">none yet for this lesson</a>.</p>
+
+<section class="sources">
+  <h2>Sources</h2>
+  <ul>
+    <li>Vulkan specification, Window System Integration: <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/VkSurfaceCapabilitiesKHR.html">VkSurfaceCapabilitiesKHR</a> (<code>currentExtent</code>, the <code>0xFFFFFFFF</code> case),
+        <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/VkPresentModeKHR.html">VkPresentModeKHR</a> (the three modes, FIFO required),
+        <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/vkAcquireNextImageKHR.html">vkAcquireNextImageKHR</a> and
+        <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/vkQueuePresentKHR.html">vkQueuePresentKHR</a>; "the presentable images of a swapchain are owned by the presentation engine".</li>
+    <li>Vulkan-Loader docs, <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md">LoaderDriverInterface.md</a>, "Handling KHR Surface Objects in WSI Extensions"; the <code>VkIcdSurfaceXlib</code> struct lives in Vulkan-Headers,
+        <a href="https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vk_icd.h">include/vulkan/vk_icd.h</a>.</li>
+    <li>Mesa, <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/vulkan/wsi/wsi_common_x11.c">src/vulkan/wsi/wsi_common_x11.c</a>: <code>x11_surface_get_capabilities</code> (geometry as the extent), <code>xcb_dri3_pixmap_from_buffers</code> (sharing), <code>xcb_present_pixmap</code> (presenting).</li>
+    <li>xorgproto, <a href="https://gitlab.freedesktop.org/xorg/proto/xorgproto/-/blob/master/dri3proto.txt">dri3proto.txt</a> (<code>PixmapFromBuffers</code>) and <a href="https://gitlab.freedesktop.org/xorg/proto/xorgproto/-/blob/master/presentproto.txt">presentproto.txt</a> (<code>PresentPixmap</code>, the vblank target).</li>
+    <li><a href="https://github.com/KhronosGroup/Vulkan-Docs/blob/main/appendices/VK_EXT_swapchain_maintenance1.adoc">VK_EXT_swapchain_maintenance1</a>, the extension appendix.</li>
+    <li><a href="../../vulkan/exercise-2/given.jai">vulkan/exercise-2/given.jai</a> and <a href="../../solutions/vulkan/exercise-2/exercise.jai">solutions/vulkan/exercise-2/exercise.jai</a>: the calls as this lesson's programs make them.</li>
+  </ul>
+</section>
+
+<p class="next"><a href="../../vulkan/exercise-2/README.md">Now do exercise 2</a></p>
+</div>
+
+</article>
+</body>
+</html>
