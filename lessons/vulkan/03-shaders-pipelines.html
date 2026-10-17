@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vulkan 3 · Shaders and pipelines</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<script src="../assets/spine.js" defer></script>
+</head>
+<body>
+<article class="lesson" data-track="vulkan" data-number="3">
+
+<header class="lesson-head">
+  <p class="crumbs"><a href="../../index.html">Understanding Graphics APIs</a> · Vulkan · 3</p>
+  <h1>Shaders and pipelines</h1>
+  <p class="lesson-links"><a class="exercise" href="../../vulkan/exercise-3/README.md">exercise-3 ↗</a></p>
+</header>
+
+<div class="where">
+  <div class="strip"></div>
+  <aside class="spine">
+    <h2 class="spine-title">Where is this happening?</h2>
+    <div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar">
+      <button class="box" data-step="s1">glslc: GLSL → SPIR-V (build time)</button>
+      <span class="arrow" data-step="s1">→</span>
+      <button class="box" data-step="s1">SPIR-V words in the binary</button>
+      <button class="box" data-step="s2">vkCreateShaderModule</button>
+      <button class="box" data-step="s3">vkCreateGraphicsPipelines</button>
+      <button class="box" data-step="s4">vkCmdSetViewport, vkCmdSetScissor</button>
+      <button class="box" data-step="s5">vkCmdDraw</button>
+    </div></div>
+    <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
+      <button class="box" data-step="s2">ICD: keep the words</button>
+      <button class="box" data-step="s3">ICD: SPIR-V → NIR → ACO → ISA</button>
+      <button class="box" data-step="s4">ICD: registers written at draw</button>
+      <button class="box" data-step="s5">ICD: a draw packet into the command stream</button>
+    </div></div>
+    <div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar">
+      <button class="box" data-step="s3">ISA and state words sit in VRAM</button>
+      <button class="box" data-step="s5">CP → shader cores run the ISA → rasterizer</button>
+    </div></div>
+    <p class="spine-legend">The highlight follows the step you are reading. Click a box to jump to its step.</p>
+  </aside>
+</div>
+
+<div class="body">
+<noscript><p class="notice">Scripts are off, so the panel does not follow the text. Everything else on this page works without them.</p></noscript>
+
+<p class="lead">Lesson 0 said that SPIR-V is compiled, not interpreted, and that the compiler is the driver. This
+lesson shows exactly when: a shader goes from GLSL on your disk, to SPIR-V words in your binary, to a
+module the driver merely keeps, to native instructions the driver produces when you create a pipeline.
+The pipeline is the other half of the story: everything you name in its create info is baked, and the
+few things you do not, the viewport and scissor here, are set per command buffer instead.</p>
+
+<p>After this you can:</p>
+<ul class="outcomes">
+  <li>say what <code>glslc</code> produces, what <code>vkCreateShaderModule</code> does with it (a copy), and when the driver compiles it to GPU instructions;</li>
+  <li>list what a graphics pipeline bakes, why changing any of it means another pipeline, and which pieces dynamic state leaves out;</li>
+  <li>get a triangle's winding right in Vulkan's y-down clip space with back-face culling on.</li>
+</ul>
+
+<section class="step" id="s1">
+  <h2>1. GLSL to SPIR-V on your machine, before the program runs</h2>
+  <p>The shader starts as text, and the first translation happens at build time, in your own process tree:
+  <code>first.jai</code> runs <code>glslc</code> on every file under the target's <code>shaders/</code> directory with
+  <code>--target-env=vulkan1.3</code>, and what comes out is SPIR-V, a stream of 32-bit words that begins with the
+  magic number <code>0x07230203</code>. There is no GPU anywhere in that stream. It is a portable intermediate
+  language: typed, structured, with the entry point and the interface named, and the same words work on
+  every Vulkan driver. <code>load_spirv</code> then reads the file at compile time, so the words live in the Jai
+  binary and the program never opens a shader file while it runs.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-3/shaders/tri.vert:1"><code>#version 450
+
+// Three corners in clip space. Vulkan's y points down in framebuffer coordinates, and the
+// specification's signed area a = -1/2 * sum(x_i * y_{i+1} - x_{i+1} * y_i) is positive for this
+// order, so the triangle is front-facing under VK_FRONT_FACE_COUNTER_CLOCKWISE.
+const vec2 corners[3] = vec2[3](
+    vec2(-0.8,  0.8),   // bottom left
+    vec2( 0.8,  0.8),   // bottom right
+    vec2( 0.0, -0.8)    // top
+);
+
+void main() {
+    <mark>gl_Position = vec4(corners[gl_VertexIndex], 0.0, 1.0);</mark>
+}</code></pre>
+  <pre class="snippet" data-src="first.jai:225"><code>for file_list(shaders_dir) {
+    if !(ends_with(it, ".vert") || ends_with(it, ".frag") || ends_with(it, ".comp"))  continue;
+
+    out := tprint("%1/%2.spv", out_dir, path_filename(it));
+    <mark>result, output, error := run_command("glslc", "--target-env=vulkan1.3", "-o", out, it, capture_and_return_output = true);</mark></code></pre>
+  <pre class="snippet" data-src="modules/Gfx_Test/module.jai:63"><code>load_spirv :: (path: string) -&gt; [] u32 {
+    data, ok := read_entire_file(path);
+    assert(ok, "load_spirv: could not read '%' (run `first.jai - shaders &lt;target&gt;` first)", path);
+    assert(data.count % 4 == 0, "load_spirv: '%' is % bytes, not a multiple of 4", path, data.count);
+    words: [] u32;
+    words.data  = cast(*u32) data.data;
+    words.count = data.count / 4;
+    <mark>assert(words.count &gt; 0 &amp;&amp; words[0] == 0x07230203, "load_spirv: '%' does not start with the SPIR-V magic number", path);</mark>
+    return words;
+}</code></pre>
+</section>
+
+<section class="step" id="s2">
+  <h2>2. <code>vkCreateShaderModule</code> copies words</h2>
+  <p>A shader module, in the specification's words, "contains shader code and one or more entry points".
+  That is all it is. On RADV the call copies the SPIR-V into driver memory, hashes it, and returns a
+  handle; nothing is parsed into a GPU form, which is why the call is cheap and why you can destroy the
+  module as soon as the pipeline that used it exists. The module is the driver's copy of your words,
+  and the pipeline, not the module, is where the compiled code lives.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-3/exercise.jai:12"><code>shader_module :: (ctx: *Gfx_Context, words: [] u32) -&gt; VkShaderModule {
+    ci: VkShaderModuleCreateInfo;
+    ci.codeSize = xx (words.count * 4);
+    ci.pCode    = words.data;
+    m: VkShaderModule;
+    <mark>result := vkCreateShaderModule(ctx.device, *ci, null, *m);</mark>
+    if result != .SUCCESS  log_error("vkCreateShaderModule failed: %", result);
+    return m;
+}</code></pre>
+  <aside class="sidebar" id="sb-shader-module" data-term="Shader module">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd>no module object: <code>dxc</code> produces DXIL, and the bytes go straight into the pipeline state description as a <code>D3D12_SHADER_BYTECODE</code></dd>
+      <dt>Metal</dt><dd>MSL is compiled by Xcode into a <code>.metallib</code>, or at run time with <code>makeLibrary(source:)</code>; a <code>MTLFunction</code> from the library is the entry point</dd>
+    </dl>
+    <pre class="snippet" data-illustrative="d3d12"><code>D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+desc.VS = { vsBlob-&gt;GetBufferPointer(), vsBlob-&gt;GetBufferSize() };
+desc.PS = { psBlob-&gt;GetBufferPointer(), psBlob-&gt;GetBufferSize() };</code></pre>
+  </aside>
+</section>
+
+<section class="step" id="s3">
+  <h2>3. <code>vkCreateGraphicsPipelines</code>: the driver compiles</h2>
+  <p>The generic statement first: the driver compiles your shaders when you create the pipeline, so the
+  pipeline object holds machine code for every stage plus the register values for every fixed-function
+  stage you named: the primitive topology, the rasterizer's cull mode and front face, the sample
+  count, the blend state, the attachment formats. Changing any of them means another pipeline, which is
+  why programs create many and cache them. The compile is why the call is slow and why a loading screen
+  hides it.</p>
+  <p>On RADV the chain is SPIR-V to NIR, Mesa's intermediate representation, then ACO, the AMD backend,
+  which emits the instruction set of the chip in front of it. The dump below is the real vertex shader
+  from the exercise, printed by the driver with <code>RADV_DEBUG=shaders</code> set in the environment when
+  the test binary ran. Read the bottom up: <code>s_endpgm</code> ends the program; <code>exp pos0</code> exports the clip
+  position; <code>buffer_load_b64</code> fetches one corner from the constant data, whose six words at the end
+  are the three corners (<code>0xbf4ccccd</code> is -0.8, <code>0x3f4ccccd</code> is 0.8); and RADV has turned the vertex
+  shader into a primitive shader ("as ESGS", the RDNA next-generation geometry path), which is why it
+  also exports the primitive. This is what "native" means: the shader cores run these words, not the
+  SPIR-V.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-3/exercise.jai:79"><code>gpci: VkGraphicsPipelineCreateInfo;
+gpci.pNext               = *rendering;
+gpci.stageCount          = stages.count;
+gpci.pStages             = stages.data;
+gpci.pVertexInputState   = *vertex_input;
+gpci.pInputAssemblyState = *input_assembly;
+gpci.pViewportState      = *viewport_state;
+gpci.pRasterizationState = *raster;
+gpci.pMultisampleState   = *multisample;
+gpci.pColorBlendState    = *blend;
+gpci.pDynamicState       = *dynamic;
+gpci.layout              = p.layout;
+gpci.renderPass          = null;
+<mark>result = vkCreateGraphicsPipelines(ctx.device, null, 1, *gpci, null, *p.handle);</mark></code></pre>
+  <figure class="diagram">
+<pre class="output"><code>Vertex Shader as ESGS
+disasm:
+BB0:
+	s_setprio 3                                                 ; bfb50003
+	s_pack_ll_b32_b16 s0, 0, s3                                 ; 99000380
+	s_delay_alu instid0(SALU_CYCLE_1)                           ; bf870009
+	s_bfe_u64 exec, -1, s0                                      ; 947e00c1
+	s_cbranch_execz BB6                                         ; bfa5000f
+BB1:
+	v_add_lshl_u32 v5, s8, v5, 3                                ; d6470005 020e0a08
+	s_getpc_b64 s[4:5]                                          ; be844700
+	s_mov_b32 s6, 24                                            ; be860098
+	s_mov_b32 s7, 0x30016fac                                    ; be8700ff 30016fac
+	s_add_u32 s4, s4, 0x64                                      ; 8004ff04 00000064
+	<mark>buffer_load_b64 v[2:3], v5, s[4:7], 0 offen                 ; e0540000 80410205</mark>
+	v_mov_b32_e32 v1, 0                                         ; 7e020280
+	v_mov_b32_e32 v4, 1.0                                       ; 7e0802f2
+	s_waitcnt vmcnt(0)                                          ; bf8903f7
+	<mark>exp pos0, v2, v3, v1, v4 done                               ; f80008cf 04010302</mark>
+BB6:
+	s_lshl_b32 s3, s3, 8                                        ; 84038803
+	s_waitcnt expcnt(0)                                         ; bf89fff0
+	s_delay_alu instid0(SALU_CYCLE_1)                           ; bf870009
+	s_bfe_u64 exec, -1, s3                                      ; 947e03c1
+	s_cbranch_execz BB12                                        ; bfa50002
+BB7:
+	exp prim, v0, off, off, off done                            ; f8000941 80808000
+BB12:
+	<mark>s_endpgm                                                    ; bfb00000</mark>
+
+/* constant data */
+[000000] bf4ccccd 3f4ccccd 3f4ccccd 3f4ccccd 00000000 bf4ccccd</code></pre>
+    <figcaption>What RADV made of <code>tri.vert</code> on the RX 7900 GRE (Mesa 26.2, RDNA 3 ISA), from
+    <code>RADV_DEBUG=shaders</code>: the machine code and its bytes on the right, with the three corners as
+    constant data. This is what sits in VRAM once <code>vkCreateGraphicsPipelines</code> returns.</figcaption>
+  </figure>
+  <aside class="sidebar" id="sb-pipeline" data-term="Graphics pipeline">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>ID3D12PipelineState</code> from a <code>D3D12_GRAPHICS_PIPELINE_STATE_DESC</code>: the same bake at the same moment, shaders and fixed-function state together</dd>
+      <dt>Metal</dt><dd><code>MTLRenderPipelineState</code> bakes the shaders, the attachment formats and blending; depth-stencil state and the viewport are set on the render command encoder instead</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s4">
+  <h2>4. Dynamic state: set per command buffer, not baked</h2>
+  <p>The pipeline asked for one viewport and one scissor but gave their values as dynamic. The
+  specification's rule is that binding a pipeline applies every piece of its state that is not dynamic
+  to the command buffer, and the dynamic pieces are set by their own commands, persisting for the
+  lifetime of the command buffer or until set again. So <code>record_triangle</code> binds the pipeline, then
+  sets the viewport it was given and a scissor over the whole extent, and the same pipeline serves the
+  128 by 128 test target, the half-width viewport of the fourth test, and the 640 by 480 window. In
+  the driver these are register values written into the command stream at draw time rather than baked
+  into the pipeline's state words.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-3/exercise.jai:115"><code>vkCmdBindPipeline(cb, .GRAPHICS, p.handle);
+vp := viewport;
+<mark>vkCmdSetViewport(cb, 0, 1, *vp);</mark>
+scissor := VkRect2D.{.{0, 0}, extent};
+vkCmdSetScissor(cb, 0, 1, *scissor);</code></pre>
+  <aside class="sidebar" id="sb-dynamic-state" data-term="Dynamic state">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>RSSetViewports</code> and <code>RSSetScissorRects</code> on the command list; viewports and scissors are always dynamic, never part of the pipeline state object</dd>
+      <dt>Metal</dt><dd><code>setViewport</code> and <code>setScissorRect</code> on the render command encoder, likewise never baked</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s5">
+  <h2>5. The draw and the winding</h2>
+  <p><code>vkCmdDraw(cb, 3, 1, 0, 0)</code> asks for three vertices and one instance; with no vertex buffers bound,
+  the only thing the vertex shader receives is <code>gl_VertexIndex</code>, 0 then 1 then 2, which is what indexes
+  the constant array. In the driver the call appends a draw packet to the command stream (lesson 4),
+  and on the GPU the command processor reads it, the shader cores run the ISA above once per vertex,
+  and the rasterizer decides which pixels the triangle covers, after it has decided whether to keep
+  the triangle at all.</p>
+  <p>That decision is the one most people get wrong when they arrive from OpenGL. The specification
+  computes a signed area in framebuffer coordinates, where y points down: a = −½ Σ (x<sub>i</sub> y<sub>i⊕1</sub> − x<sub>i⊕1</sub> y<sub>i</sub>),
+  and "<code>VK_FRONT_FACE_COUNTER_CLOCKWISE</code> specifies that a triangle with positive area is considered
+  front-facing". For the corners in the order bottom left, bottom right, top the sum is −2.56, so a is
+  +1.28 and the triangle is front-facing; with back-face culling on it shows. The same three corners
+  with <code>CLOCKWISE</code> leave the target black, which is the second test, and with <code>NONE</code> the winding
+  stops mattering, which is the third.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-3/exercise.jai:120"><code><mark>vkCmdDraw(cb, 3, 1, 0, 0);</mark></code></pre>
+  <pre class="snippet" data-src="vulkan/exercise-3/cases.jai:30"><code>triangle_culled_when_front_face_is_clockwise :: (ctx: *Gfx_Context) -&gt; bool {
+    <mark>p, ok := draw_once(ctx, .CLOCKWISE, .BACK_BIT, FULL);</mark>
+    if !ok  return false;
+    return expect_region_solid(p, 0, 0, 128, 128, 0, 0, 0, 255);
+}</code></pre>
+  <figure class="diagram">
+    <svg viewBox="0 0 660 300" role="img" aria-labelledby="fig3-title">
+      <title id="fig3-title">Clip space with y pointing down, the three corners in draw order, the signed-area direction, and the half-width viewport</title>
+      <defs>
+        <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <g class="node">
+        <rect x="40" y="40" width="220" height="220"/>
+        <text x="150" y="30" text-anchor="middle">clip space, x and y in [−1, 1]</text>
+      </g>
+      <path class="link" d="M150,40 L150,225"/>
+      <path class="link" d="M45,150 L255,150"/>
+      <text class="small" x="156" y="222">+y (down)</text>
+      <text class="small" x="236" y="146">+x</text>
+      <path d="M62,238 L238,238 L150,62 Z" fill="color-mix(in srgb, var(--lane-cpu) 35%, transparent)" stroke="var(--lane-cpu)" stroke-width="1.5"/>
+      <text x="56" y="256" text-anchor="middle">0 (−0.8, 0.8)</text>
+      <text x="244" y="256" text-anchor="middle">1 (0.8, 0.8)</text>
+      <text x="150" y="56" text-anchor="middle">2 (0.0, −0.8)</text>
+      <path class="link hot" d="M118,205 A 40,40 0 1 1 182,205" fill="none"/>
+      <text class="small" x="150" y="166" text-anchor="middle">0 → 1 → 2: a &gt; 0</text>
+      <text class="small" x="150" y="180" text-anchor="middle">front-facing (CCW)</text>
+      <g class="node">
+        <rect x="380" y="40" width="240" height="240"/>
+        <text x="500" y="30" text-anchor="middle">framebuffer 128 × 128, viewport {64, 0, 64, 128}</text>
+      </g>
+      <rect x="500" y="40" width="120" height="240" fill="color-mix(in srgb, var(--lane-gpu) 12%, transparent)" stroke="var(--lane-gpu)" stroke-dasharray="4 3"/>
+      <path d="M512,256 L608,256 L560,64 Z" fill="color-mix(in srgb, var(--lane-cpu) 35%, transparent)" stroke="var(--lane-cpu)" stroke-width="1.5"/>
+      <text class="small" x="440" y="165" text-anchor="middle">left half: black</text>
+      <text class="small" x="560" y="296" text-anchor="middle">(96, 64) and (96, 100) are green</text>
+      <path class="link" d="M265,150 L375,150"/>
+      <text class="small" x="320" y="142" text-anchor="middle">viewport</text>
+    </svg>
+    <figcaption>Left: clip space as Vulkan defines it, y increasing downward, with the corners in draw order and
+    the direction that makes the signed area positive. Right: the same triangle through the fourth test's
+    half-width viewport, which is dynamic state, so the pipeline did not change.</figcaption>
+  </figure>
+</section>
+
+<section class="endnotes">
+  <h2>Endnotes</h2>
+  <details class="endnote">
+    <summary><code>VkPipelineCache</code> saved to a file</summary>
+    <p>A common alternative to compiling at every start is a <code>VkPipelineCache</code> whose blob is saved to
+    disk and loaded next time, which enables the driver to skip the compile for pipelines it has seen;
+    useful once there are dozens of pipelines; the cost is saving and loading the blob and checking its
+    header against the driver and device before trusting it.</p>
+  </details>
+  <details class="endnote">
+    <summary>Vulkan 1.3 dynamic state for cull mode, front face and topology</summary>
+    <p>A common alternative to one pipeline per winding is the Vulkan 1.3 dynamic states (from
+    <code>VK_EXT_extended_dynamic_state</code>), which enable <code>vkCmdSetCullMode</code>, <code>vkCmdSetFrontFace</code> and
+    <code>vkCmdSetPrimitiveTopology</code> per draw; useful when one pipeline must serve both windings; the cost is
+    more <code>vkCmdSet*</code> calls before every draw, and state that is no longer visible in the pipeline.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>VK_KHR_pipeline_executable_properties</code></summary>
+    <p>A common alternative to <code>RADV_DEBUG=shaders</code> is <code>VK_KHR_pipeline_executable_properties</code>, which
+    enables reading the compiled code and its statistics back through the API; useful for seeing what any
+    driver made without an environment variable; the cost is enabling the feature and setting
+    <code>VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR</code> on the pipeline.</p>
+  </details>
+</section>
+
+<p class="deep-dive">Deep dives: <a href="deep-dives/README.md">"What RADV emits for vkCmdDraw" is the first candidate</a>; none written yet.</p>
+
+<section class="sources">
+  <h2>Sources</h2>
+  <ul>
+    <li>Vulkan specification, <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/VkShaderModule.html">VkShaderModule</a> ("shader modules contain shader code and one or more entry points"),
+        <a href="https://registry.khronos.org/vulkan/specs/latest/man/html/vkCreateGraphicsPipelines.html">vkCreateGraphicsPipelines</a>,
+        <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#pipelines-dynamic-state">Dynamic State</a>, and
+        <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#primsrast-polygons-basic">Basic Polygon Rasterization</a> (the signed area and the front-facing rule).</li>
+    <li>SPIR-V specification, <a href="https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#Magic">Magic Number</a> and <a href="https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#PhysicalLayout">Physical Layout of a SPIR-V Module</a>.</li>
+    <li>Mesa, <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/radv_pipeline_graphics.c">src/amd/vulkan/radv_pipeline_graphics.c</a> (<code>radv_graphics_pipeline_compile</code>, <code>radv_shader_nir_to_asm</code>),
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/compiler/README.md">src/amd/compiler/README.md</a> (ACO: NIR to GCN/RDNA binary), and
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/docs/envvars.rst">docs/envvars.rst</a> (<code>RADV_DEBUG=shaders</code>).</li>
+    <li>shaderc, <a href="https://github.com/google/shaderc/blob/main/glslc/README.asciidoc">glslc/README.asciidoc</a> (<code>--target-env=vulkan1.3</code>).</li>
+    <li><a href="../../solutions/vulkan/exercise-3/exercise.jai">solutions/vulkan/exercise-3/exercise.jai</a>, <a href="../../solutions/vulkan/exercise-3/shaders/tri.vert">its tri.vert</a>, <a href="../../first.jai">first.jai</a> and <a href="../../modules/Gfx_Test/module.jai">modules/Gfx_Test/module.jai</a>: the code as this lesson's programs run it.</li>
+  </ul>
+</section>
+
+<p class="next"><a href="../../vulkan/exercise-3/README.md">Now do exercise 3</a></p>
+</div>
+
+</article>
+</body>
+</html>
