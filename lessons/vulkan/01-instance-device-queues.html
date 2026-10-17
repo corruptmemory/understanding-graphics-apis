@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vulkan 1 · Instance, device, queues</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<script src="../assets/spine.js" defer></script>
+</head>
+<body>
+<article class="lesson" data-track="vulkan" data-number="1">
+
+<header class="lesson-head">
+  <p class="crumbs"><a href="../../index.html">Understanding Graphics APIs</a> · Vulkan · 1</p>
+  <h1>Instance, device, queues</h1>
+  <p class="lesson-links"><a class="exercise" href="../../vulkan/exercise-1/README.md">exercise-1 ↗</a></p>
+</header>
+
+<div class="where">
+  <div class="strip"></div>
+  <aside class="spine">
+    <h2 class="spine-title">Where is this happening?</h2>
+    <div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar">
+      <button class="box" data-step="s1">vkCreateInstance</button>
+      <button class="box" data-step="s2">vkEnumeratePhysicalDevices</button>
+      <button class="box" data-step="s3">vkGetPhysicalDeviceQueueFamilyProperties</button>
+      <button class="box" data-step="s4">vkCreateDevice</button>
+      <button class="box" data-step="s5">vkGetDeviceQueue</button>
+    </div></div>
+    <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
+      <button class="box" data-step="s1">loader: trampoline → layer → terminator → ICD</button>
+      <button class="box" data-step="s2">loader: ask every ICD</button>
+      <button class="box" data-step="s3">ICD: one family per kind of engine</button>
+      <button class="box" data-step="s4">ICD: create the context</button>
+      <button class="box" data-step="s5">ICD: queue object</button>
+    </div></div>
+    <div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar">
+      <button class="box" data-step="s3">rings: graphics, compute, DMA</button>
+      <button class="box" data-step="s4">kernel: a context, a scheduler entity per queue</button>
+      <span class="arrow" data-step="s5">→</span>
+      <button class="box" data-step="s5">kernel: drm_sched entity → ring</button>
+    </div></div>
+    <p class="spine-legend">The highlight follows the step you are reading. Click a box to jump to its step.</p>
+  </aside>
+</div>
+
+<div class="body">
+<noscript><p class="notice">Scripts are off, so the panel does not follow the text. Everything else on this page works without them.</p></noscript>
+
+<p class="lead">Lesson 0 placed the loader, the layers and the ICD in the driver lane. This lesson follows the
+three objects every Vulkan program creates before it can do anything: the instance, which belongs to
+the loader; the device, which is the ICD's and, underneath it, the kernel's; and the queues, which are
+the channels work travels down. The harness's <code>device.jai</code> and exercise 1's solution are the code.</p>
+
+<p>After this you can:</p>
+<ul class="outcomes">
+  <li>trace one <code>vkCreateDevice</code> call from your code through the loader's trampoline, the validation layer and into the ICD;</li>
+  <li>say what a queue family is, what a queue is in the ICD, and what it is in the kernel;</li>
+  <li>choose families for graphics and transfer on a device you have never seen, and defend the choice.</li>
+</ul>
+
+<section class="step" id="s1">
+  <h2>1. The instance is the loader's object</h2>
+  <p>The harness asks for one layer and three extensions, and that is what shapes the chain the loader
+  builds. Every function you call on a <code>VkInstance</code>, or on any handle that descends from it, enters a
+  trampoline in <code>libvulkan.so.1</code>; the trampoline reads the dispatch table the handle points at and
+  jumps to the first entry, the validation layer's version of the function; the layer checks its
+  arguments and calls the next entry; the last entry is the loader's terminator, which calls the ICD. The
+  rule that makes this work is that a <em>dispatchable</em> handle (<code>VkInstance</code>, <code>VkPhysicalDevice</code>,
+  <code>VkDevice</code>, <code>VkQueue</code>, <code>VkCommandBuffer</code>) is a pointer whose first word is a pointer to that
+  dispatch table; the loader writes it when the object is created, and every layer agrees to keep it. A
+  <code>VkBuffer</code> or <code>VkImage</code> is not dispatchable: calls on those go through the device they belong to.</p>
+  <pre class="snippet" data-src="modules/Gfx_Test/device.jai:83"><code><mark>ici: VkInstanceCreateInfo;</mark>
+ici.pNext                   = ifx options.sync_validation then cast(*void) *validation_features else cast(*void) *dbg;
+ici.pApplicationInfo        = *app;
+ici.enabledLayerCount       = layers.count;
+ici.ppEnabledLayerNames     = layers.data;
+ici.enabledExtensionCount   = exts.count;
+ici.ppEnabledExtensionNames = exts.data;
+
+result := vkCreateInstance(*ici, null, *ctx.instance);</code></pre>
+  <aside class="sidebar" id="sb-instance" data-term="Instance">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd>no instance object; <code>CreateDXGIFactory2</code> gives you the factory that enumerates adapters, and <code>D3D12CreateDevice</code> takes one adapter straight to a device</dd>
+      <dt>Metal</dt><dd>no instance either; the framework is always present and <code>MTLCreateSystemDefaultDevice</code> is the first call</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s2">
+  <h2>2. Choosing a physical device</h2>
+  <p>A physical device is a GPU as one ICD describes it. The terminator asks every ICD the loader found
+  for its list and concatenates them: on this desktop that is one ICD and one device; on the hybrid
+  laptop the Intel and NVIDIA ICDs each contribute one, and the order is whatever the loader's manifest
+  scan produced. The harness turns each into a <code>Device_Candidate</code> and picks with a rule it can test
+  without a GPU: the first discrete device that reports Vulkan 1.3 or newer, else the first device that
+  does. The lowest index wins ties, so the choice is stable from run to run.</p>
+  <pre class="snippet" data-src="modules/Gfx_Test/device.jai:7"><code><mark>choose_physical_device :: (candidates: [] Device_Candidate) -&gt; int {</mark>
+    first_capable := -1;
+    for candidates {
+        if !supports_1_3(it.api_version)  continue;
+        if it.device_type == .DISCRETE_GPU  return it.index;
+        if first_capable == -1  first_capable = it.index;
+    }
+    return first_capable;
+}</code></pre>
+</section>
+
+<section class="step" id="s3">
+  <h2>3. Queue families: what the hardware exposes</h2>
+  <p>A queue family is a set of queues with the same capabilities, and underneath it is one kind of
+  hardware engine. The ICD reports one family per engine kind it chooses to expose, with the flags that
+  engine can honor and how many queues it offers. The specification adds a rule worth knowing before you
+  write a chooser: a family with <code>GRAPHICS_BIT</code> or <code>COMPUTE_BIT</code> can always transfer, so reporting
+  <code>TRANSFER_BIT</code> on it is optional. A transfer-only family, when there is one, is a DMA engine: cheaper
+  to run alongside graphics and the right place for uploads once lesson 6 needs them.</p>
+  <p>RADV on this desktop reports five families: graphics with compute, transfer and sparse binding (one
+  queue); compute with transfer and sparse binding (four queues, one per hardware compute pipe); video
+  decode; video encode; and sparse binding alone. None is transfer-only: the compute family has
+  <code>COMPUTE_BIT</code>, and the sparse family lacks <code>TRANSFER_BIT</code>, so it cannot copy at all. The chooser
+  below therefore lands on <code>0 / 0</code> here, while on an NVIDIA or Intel discrete part it finds the DMA
+  family the exercise's table cases describe.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-1/exercise.jai:9"><code>choose_queue_families :: (families: [] VkQueueFamilyProperties) -&gt; (choice: Queue_Choice, ok: bool) {
+    graphics := -1;
+    transfer := -1;
+    for families {
+        if graphics &lt; 0 &amp;&amp; (it.queueFlags &amp; .GRAPHICS_BIT)  graphics = it_index;
+        <mark>if transfer &lt; 0 &amp;&amp; (it.queueFlags &amp; .TRANSFER_BIT) &amp;&amp; !(it.queueFlags &amp; (.GRAPHICS_BIT | .COMPUTE_BIT))  transfer = it_index;</mark>
+    }
+    if graphics &lt; 0  return .{}, false;
+    if transfer &lt; 0  transfer = graphics;
+    return .{xx graphics, xx transfer}, true;
+}</code></pre>
+  <aside class="sidebar" id="sb-queue-family" data-term="Queue family">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>D3D12_COMMAND_LIST_TYPE</code> DIRECT, COMPUTE and COPY name the engine kinds; you choose one when you create the queue rather than enumerating families</dd>
+      <dt>Metal</dt><dd>one kind of <code>MTLCommandQueue</code>; the driver routes encoders to the engines itself</dd>
+    </dl>
+    <pre class="snippet" data-illustrative="d3d12"><code>D3D12_COMMAND_QUEUE_DESC desc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
+device-&gt;CreateCommandQueue(&amp;desc, IID_PPV_ARGS(&amp;copyQueue));</code></pre>
+  </aside>
+</section>
+
+<section class="step" id="s4">
+  <h2>4. <code>vkCreateDevice</code>: the ICD opens a kernel context</h2>
+  <p>A logical device is the ICD's object for one physical device, and underneath it a kernel context: the
+  kernel's record of one process using one GPU, with per-queue scheduling state hung off it. The create
+  info names which families to open queues on, how many, and which features to turn on; here the 1.3
+  features the lessons rely on are chained through <code>VkPhysicalDeviceFeatures2</code> in <code>pNext</code>, which is
+  how everything after Vulkan 1.0 is asked for. Generically, the ICD validates the request against what
+  it reported, allocates its device state, and asks the kernel driver for a context. On RADV that last
+  step is <code>radv_amdgpu_ctx_create</code> issuing the <code>DRM_AMDGPU_CTX</code> ioctl to <code>amdgpu</code>, which
+  answers with a context handle every later submission carries.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-1/exercise.jai:35"><code>features13: VkPhysicalDeviceVulkan13Features;
+features13.dynamicRendering = VK_TRUE;
+features13.synchronization2 = VK_TRUE;
+features2: VkPhysicalDeviceFeatures2;
+features2.pNext = *features13;
+
+dci: VkDeviceCreateInfo;
+dci.pNext                = *features2;
+dci.queueCreateInfoCount = family_count;
+dci.pQueueCreateInfos    = qcis.data;
+
+device: VkDevice;
+<mark>result := vkCreateDevice(physical, *dci, null, *device);</mark></code></pre>
+</section>
+
+<section class="step" id="s5">
+  <h2>5. A queue underneath: a scheduled channel to a ring</h2>
+  <p><code>vkGetDeviceQueue</code> allocates nothing: the queues were made with the device, and the call hands back
+  a dispatchable handle to one of them. In the ICD a queue is a small object that remembers its family
+  and so which engine kind its submissions target. In the kernel the picture is the one that explains
+  ordering. <code>amdgpu</code> keeps, inside the context, one scheduler entity per engine and ring the process
+  submits to; the DRM GPU scheduler pushes each entity's jobs, in the order they were pushed, onto the
+  hardware run queue for that engine, and the hardware ring is where the command processor reads them.
+  Two queues on one family are two entities feeding one kind of engine; the order between them is
+  decided by the scheduler and by the sync objects you attach, never by the order of your calls.
+  Lesson 4 is where a submission travels this path.</p>
+  <pre class="snippet" data-src="solutions/vulkan/exercise-1/exercise.jai:53"><code>graphics, transfer: VkQueue;
+<mark>vkGetDeviceQueue(device, choice.graphics_family, 0, *graphics);</mark>
+vkGetDeviceQueue(device, choice.transfer_family, 0, *transfer);</code></pre>
+  <figure class="diagram">
+    <svg viewBox="0 0 660 330" role="img" aria-labelledby="fig1-title">
+      <title id="fig1-title">A queue handle in your process, the ICD's queue object, the kernel's scheduler entity, and the hardware rings</title>
+      <defs>
+        <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <g data-lane="cpu">
+        <rect class="band" x="4" y="4" width="652" height="78"/>
+        <text class="band-tag" x="14" y="22">CPU · your process</text>
+        <g class="node"><rect x="14" y="36" width="170" height="30"/><text x="99" y="56" text-anchor="middle">VkQueue (graphics)</text></g>
+        <g class="node"><rect x="230" y="36" width="170" height="30"/><text x="315" y="56" text-anchor="middle">VkQueue (transfer)</text></g>
+        <text class="small" x="430" y="56">two handles; here one queue</text>
+      </g>
+      <g data-lane="driver">
+        <rect class="band" x="4" y="90" width="652" height="104"/>
+        <text class="band-tag" x="14" y="108">driver · ICD</text>
+        <g class="node"><rect x="14" y="122" width="170" height="30"/><text x="99" y="142" text-anchor="middle">radv_queue · GENERAL</text></g>
+        <g class="node"><rect x="230" y="122" width="170" height="30"/><text x="315" y="142" text-anchor="middle">radv_queue · TRANSFER</text></g>
+        <g class="node"><rect x="440" y="122" width="200" height="30"/><text x="540" y="142" text-anchor="middle">amdgpu context (hw_ctx)</text></g>
+        <path class="link" d="M99,66 L99,120"/>
+        <path class="link" d="M315,66 L315,120"/>
+        <path class="link" d="M184,137 L228,137"/>
+        <path class="link" d="M400,137 L438,137"/>
+        <text class="small" x="14" y="180">a queue remembers its family; the context is per device and goes with every submission</text>
+      </g>
+      <g data-lane="gpu">
+        <rect class="band" x="4" y="202" width="652" height="124"/>
+        <text class="band-tag" x="14" y="220">GPU · kernel driver and hardware</text>
+        <g class="node"><rect x="14" y="234" width="170" height="30"/><text x="99" y="254" text-anchor="middle">drm_sched entity · GFX</text></g>
+        <g class="node"><rect x="230" y="234" width="170" height="30"/><text x="315" y="254" text-anchor="middle">drm_sched entity · SDMA</text></g>
+        <g class="node"><rect x="14" y="284" width="170" height="30"/><text x="99" y="304" text-anchor="middle">ring: graphics</text></g>
+        <g class="node"><rect x="230" y="284" width="170" height="30"/><text x="315" y="304" text-anchor="middle">ring: DMA</text></g>
+        <g class="node"><rect x="440" y="284" width="200" height="30"/><text x="540" y="304" text-anchor="middle">ring: compute (×4)</text></g>
+        <path class="link hot" d="M99,152 L99,232"/>
+        <path class="link" d="M315,152 L315,232"/>
+        <path class="link hot" d="M99,264 L99,282"/>
+        <path class="link" d="M315,264 L315,282"/>
+        <text class="small" x="440" y="254">jobs leave an entity in push order</text>
+      </g>
+    </svg>
+    <figcaption>One queue, top to bottom: the handle in your process, the ICD's queue object with its family, the
+    kernel's scheduler entity inside the device's context, and the hardware ring the command processor reads.
+    The rings are what the families stand for; the entity is what "submission order is per queue" means.</figcaption>
+  </figure>
+  <aside class="sidebar" id="sb-queue" data-term="Queue">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>ID3D12CommandQueue</code> from <code>CreateCommandQueue</code>, typed by its command list type; the same kernel scheduler sits underneath on Windows</dd>
+      <dt>Metal</dt><dd><code>MTLCommandQueue</code> from <code>device.makeCommandQueue()</code>; command buffers from one queue execute in the order they were committed</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="endnotes">
+  <h2>Endnotes</h2>
+  <details class="endnote">
+    <summary><code>MESA_VK_DEVICE_SELECT</code></summary>
+    <p>A common alternative to choosing in code is <code>MESA_VK_DEVICE_SELECT</code>, which Mesa's device-select
+    layer reads to reorder the physical device list; useful on the hybrid laptop when the integrated GPU
+    comes first and you want the discrete one without touching the program; the cost is an environment
+    variable and an implicit layer sitting in every instance's chain.</p>
+  </details>
+  <details class="endnote">
+    <summary>A second queue from a compute-only family</summary>
+    <p>A common alternative is a second queue created from a compute-only family, which enables compute
+    work that overlaps the graphics queue; useful for async compute once there is compute work; the cost
+    is semaphores between the two queues and queue-family ownership transfers for every resource both
+    touch.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>queueCount</code> greater than one</summary>
+    <p>A common alternative is asking one family for several queues, which enables submitting from several
+    threads without a lock around one queue; useful once recording is parallel; the cost is that the
+    family must report that many, and ordering between the queues is by sync objects only.</p>
+  </details>
+</section>
+
+<p class="deep-dive">Deep dives: <a href="deep-dives/README.md">none yet for this lesson</a>.</p>
+
+<section class="sources">
+  <h2>Sources</h2>
+  <ul>
+    <li>Vulkan-Loader docs, <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderInterfaceArchitecture.md">LoaderInterfaceArchitecture.md</a>: dispatch tables, trampolines and terminators, the instance and device call chains.</li>
+    <li>Vulkan specification, <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#devsandqueues-device-creation">Device Creation</a> and
+        <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#devsandqueues-queues">Queues</a>, including the note that <code>VK_QUEUE_TRANSFER_BIT</code> is optional on graphics and compute families.</li>
+    <li>Mesa, <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/radv_physical_device.c">src/amd/vulkan/radv_physical_device.c</a> (<code>radv_GetPhysicalDeviceQueueFamilyProperties2</code>: the family table),
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/radv_device.c">src/amd/vulkan/radv_device.c</a> (device creation calls <code>ws-&gt;ctx_create</code> once per priority),
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/radv_queue.c">src/amd/vulkan/radv_queue.c</a> (<code>radv_queue_init</code>: a queue's family and its <code>hw_ctx</code>),
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/winsys/amdgpu/radv_amdgpu_cs.c">src/amd/vulkan/winsys/amdgpu/radv_amdgpu_cs.c</a> (<code>radv_amdgpu_ctx_create</code>),
+        <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/docs/envvars.rst">docs/envvars.rst</a> (<code>MESA_VK_DEVICE_SELECT</code>).</li>
+    <li>Linux, <a href="https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c">drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c</a> (<code>amdgpu_ctx_init_entity</code>: one scheduler entity per engine and ring in a context),
+        <a href="https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/scheduler/sched_main.c">drivers/gpu/drm/scheduler/sched_main.c</a> (the "Overview" comment: entities, run queues, push order), and
+        <a href="https://github.com/torvalds/linux/blob/master/Documentation/gpu/drm-mm.rst">Documentation/gpu/drm-mm.rst</a> (the GPU Scheduler section).</li>
+    <li><a href="../../modules/Gfx_Test/device.jai">modules/Gfx_Test/device.jai</a> and <a href="../../solutions/vulkan/exercise-1/exercise.jai">solutions/vulkan/exercise-1/exercise.jai</a>: the calls as this lesson's programs make them.</li>
+  </ul>
+</section>
+
+<p class="next"><a href="../../vulkan/exercise-1/README.md">Now do exercise 1</a></p>
+</div>
+
+</article>
+</body>
+</html>
