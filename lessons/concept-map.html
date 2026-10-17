@@ -13,7 +13,14 @@
 <p class="lead">The cross-API glossary, assembled by <code>first.jai - concept-map</code> from every sidebar in every
 lesson: the Vulkan term, the lesson that introduces it, and what D3D12 and Metal call it. Generated;
 edit the sidebar, not this page.</p>
-<p class="empty">No sidebars yet.</p>
+<table class="concept-map">
+<thead><tr><th>Term</th><th>Lesson</th><th>D3D12</th><th>Metal</th></tr></thead>
+<tbody>
+<tr><td>ICD</td><td><a href="vulkan/00-three-layers.html#sb-icd">vulkan 0: The three layers</a></td><td>the user-mode driver (UMD) per adapter; you never name it, <code>IDXGIFactory::EnumAdapters</code> lists adapters and <code>D3D12CreateDevice</code> loads the DLL the adapter maps to</td><td>no manifests and no file to point at: <code>MTLCreateSystemDefaultDevice</code> and <code>MTLCopyAllDevices</code> return the devices the system driver exposes</td></tr>
+<tr><td>Loader</td><td><a href="vulkan/00-three-layers.html#sb-loader">vulkan 0: The three layers</a></td><td><code>d3d12.dll</code> plus DXGI play the role: DXGI enumerates adapters and the runtime loads the user-mode driver DLL the adapter names</td><td>the framework itself is the entry point; the driver is a plug-in the system loads under IOKit, with no manifests to read</td></tr>
+<tr><td>Validation layer</td><td><a href="vulkan/00-three-layers.html#sb-layer">vulkan 0: The three layers</a></td><td>the debug layer, switched on with <code>ID3D12Debug::EnableDebugLayer</code> before the device exists; a runtime component rather than a library a loader interposes</td><td>API validation, switched on in the Xcode scheme or with <code>MTL_DEBUG_LAYER=1</code>; the framework wraps its own objects</td></tr>
+</tbody>
+</table>
 </main>
 </body>
 </html>

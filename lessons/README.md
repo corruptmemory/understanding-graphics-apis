@@ -97,6 +97,25 @@ window at desktop width, and a long label makes the lane scroll.
 `spine.js` lights the boxes of the step nearest the reading line, fills the strip's chips below 1100 px,
 and jumps to a step when its box is clicked. It needs nothing from the page beyond the contract.
 
+## Diagrams
+
+Every lesson has one `<figure class="diagram">` holding an inline `<svg viewBox="…" role="img">` and a
+`<figcaption>`; no external images, so the page works from `file://` and themes with the tokens. The
+`viewBox` does the scaling: the stylesheet gives the SVG the page's measure (`max-width: 70ch`) and
+`height: auto`. Draw with the lane tokens:
+
+- a band is `<g data-lane="cpu|driver|gpu">` holding a `<rect class="band">` (filled and stroked with
+  that lane's color through `--lane-color`) and a `<text class="band-tag">` label;
+- a box inside a band is `<g class="node"><rect/><text/></g>`;
+- a thing that moves between layers (bytecode, a buffer, a stream) is `<g class="token"><rect/><text/></g>`,
+  drawn dashed so it reads as data rather than a component;
+- arrows are `<path class="link">` ending in the figure's own `<marker id="arrowhead">`; add `hot` for
+  the one the step is about;
+- the text size is set by the stylesheet (`.78rem`), so position with the `viewBox` units and keep
+  labels short enough for the 720 px column.
+
+Lesson 0 draws the three bands every later diagram reuses; copy its figure and change the boxes.
+
 ## Deep dives
 
 A deep dive is an optional page on one topic, added only when that topic grabs you. It lives at

@@ -260,6 +260,32 @@ pre[data-illustrative]::before {
 }
 .endnote summary { cursor: pointer; color: var(--fg); }
 
+/* ---- diagrams: one inline SVG per lesson, drawn with the lane tokens --------------------- */
+
+figure.diagram { margin: 1.2rem 0; }
+figure.diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 70ch;
+  font: .78rem var(--font);
+}
+figure.diagram text { fill: var(--fg); }
+figure.diagram [data-lane] > rect.band {
+  fill: color-mix(in srgb, var(--lane-color) 14%, transparent);
+  stroke: var(--lane-color);
+  stroke-width: 1;
+}
+figure.diagram [data-lane] > text.band-tag { fill: var(--lane-color); font-weight: 700; }
+figure.diagram .node rect { fill: var(--bg); stroke: var(--line); rx: 4; }
+figure.diagram .token rect { fill: var(--bg); stroke: var(--line); stroke-dasharray: 3 2; rx: 10; }
+figure.diagram .token text { font-weight: 600; }
+figure.diagram .link { stroke: var(--fg-3); stroke-width: 1.2; fill: none; marker-end: url(#arrowhead); }
+figure.diagram .link.hot { stroke: var(--accent); }
+figure.diagram marker path { fill: var(--fg-3); }
+figure.diagram .small { font-size: .68rem; fill: var(--fg-2); }
+figure.diagram figcaption { font-size: .85rem; color: var(--fg-2); max-width: 70ch; margin-top: .4rem; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vulkan 0 · The three layers</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<script src="../assets/spine.js" defer></script>
+</head>
+<body>
+<article class="lesson" data-track="vulkan" data-number="0">
+
+<header class="lesson-head">
+  <p class="crumbs"><a href="../../index.html">Understanding Graphics APIs</a> · Vulkan · 0</p>
+  <h1>The three layers</h1>
+  <p class="lesson-links"><a class="exercise" href="../../vulkan/exercise-0/README.md">exercise-0 ↗</a></p>
+</header>
+
+<div class="where">
+  <div class="strip"></div>
+  <aside class="spine">
+    <h2 class="spine-title">Where is this happening?</h2>
+    <div class="lane" data-lane="cpu"><span class="lane-tag">CPU</span><div class="bar">
+      <button class="box" data-step="s1">vkEnumerateInstanceLayerProperties</button>
+      <button class="box" data-step="s2">vkEnumerateInstanceExtensionProperties</button>
+      <button class="box" data-step="s3">vkCreateInstance</button>
+      <button class="box" data-step="s4">vkEnumeratePhysicalDevices</button>
+      <button class="box" data-step="s5">SPIR-V words in your process</button>
+    </div></div>
+    <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
+      <button class="box" data-step="s1">loader: read the manifests</button>
+      <button class="box" data-step="s2">loader: dlopen each ICD</button>
+      <span class="arrow" data-step="s2">→</span>
+      <button class="box" data-step="s2">loader + layers: merge the lists</button>
+      <button class="box" data-step="s3">loader: trampoline → layers → terminator</button>
+      <span class="arrow" data-step="s3">→</span>
+      <button class="box" data-step="s3">each ICD: vkCreateInstance</button>
+      <button class="box" data-step="s4">ICD: open the render node</button>
+      <button class="box" data-step="s5">ICD: compile (lesson 3), record (lesson 4)</button>
+    </div></div>
+    <div class="lane" data-lane="gpu"><span class="lane-tag">GPU</span><div class="bar">
+      <button class="box" data-step="s4">kernel: describe the hardware</button>
+      <button class="box" data-step="s5">command processor firmware reads the stream</button>
+    </div></div>
+    <p class="spine-legend">The highlight follows the step you are reading. Click a box to jump to its step.</p>
+  </aside>
+</div>
+
+<div class="body">
+<noscript><p class="notice">Scripts are off, so the panel does not follow the text. Everything else on this page works without them.</p></noscript>
+
+<p class="lead">Between a call in your program and a pixel on the screen sit three layers: your process, where the
+bindings and your data live; the driver side, which is the loader, any layers it inserts, and the
+installable client driver (ICD) that knows the hardware; and the kernel driver with the GPU behind it.
+Every lesson's panel on the right uses those three lanes, so this lesson walks five enumeration
+calls, asks which lane answers each one, and then takes apart the picture most people start with:
+"a command buffer is bytecode plus data that reaches the GPU, whose firmware interprets it".</p>
+
+<p>After this you can:</p>
+<ul class="outcomes">
+  <li>name the three layers and say which one answers each of the five enumeration calls;</li>
+  <li>tell apart shader bytecode, a command buffer and the driver's command stream, and say which of them the GPU's firmware reads;</li>
+  <li>say what a Vulkan layer is and where it sits in the chain of calls.</li>
+</ul>
+
+<section class="step" id="s1">
+  <h2>1. Your call lands in the loader</h2>
+  <p><code>vkEnumerateInstanceLayerProperties</code> is the first Vulkan call <code>given.jai</code> makes, and the
+  answer never leaves the driver lane's first box. The function lives in <code>libvulkan.so.1</code>, the Khronos
+  loader, which your binary links against. To answer, the loader walks the layer manifest directories it
+  knows (<code>/usr/share/vulkan/explicit_layer.d</code>, <code>implicit_layer.d</code>, the <code>/etc</code> and
+  <code>$XDG</code> equivalents) and parses one small JSON file per layer. No driver has been opened yet; no
+  layer library has been loaded either. A layer is a shared library the loader can insert between your
+  call and the driver, and at this point it is only a file name in a manifest. The two-call pattern,
+  count then fill, is how every Vulkan enumeration works.</p>
+  <pre class="snippet" data-src="vulkan/exercise-0/given.jai:27"><code>layer_count: u32;
+<mark>result = vkEnumerateInstanceLayerProperties(*layer_count, null);</mark>
+if result != .SUCCESS {
+    log_error("vkEnumerateInstanceLayerProperties (count) failed: %", result);
+    return inv, false;
+}
+layer_props := NewArray(layer_count, VkLayerProperties);
+defer free(layer_props.data);
+result = vkEnumerateInstanceLayerProperties(*layer_count, layer_props.data);</code></pre>
+  <aside class="sidebar" id="sb-loader" data-term="Loader">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd><code>d3d12.dll</code> plus DXGI play the role: DXGI enumerates adapters and the runtime loads the user-mode driver DLL the adapter names</dd>
+      <dt>Metal</dt><dd>the framework itself is the entry point; the driver is a plug-in the system loads under IOKit, with no manifests to read</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s2">
+  <h2>2. Extensions: what the loader, the layers and the drivers offer</h2>
+  <p>An extension is a named bundle of commands and structures beyond the core API, and the thing to
+  notice is that three different parties can offer one. The loader implements a few itself
+  (<code>VK_KHR_surface</code>, <code>VK_KHR_xlib_surface</code>, <code>VK_EXT_debug_utils</code>). Each driver reports its
+  own. And a layer can add some: <code>VK_EXT_validation_features</code> exists only because the validation layer
+  provides it. Asked with a null layer name, <code>vkEnumerateInstanceExtensionProperties</code> hands back one
+  merged list, loader plus drivers plus whatever implicit layers are enabled, and does not say who
+  contributed what. Asked with a layer's name, it reads that layer's manifest and returns exactly that
+  layer's list, which is why <code>given.jai</code> asks once per layer and why exercise 0 makes you
+  reconstruct the sources.</p>
+  <p>The null-name query is also the first call that needs a driver's answer, so this is where the loader
+  goes through <code>/usr/share/vulkan/icd.d</code>, <code>dlopen</code>s the library each ICD manifest names
+  (<code>libvulkan_radeon.so</code> on this desktop, from <code>radeon_icd.json</code>), and negotiates the
+  loader-to-driver interface version with it. A program that skips the enumerations pays that cost at
+  <code>vkCreateInstance</code> instead; the work is the same.</p>
+  <pre class="snippet" data-src="vulkan/exercise-0/given.jai:42"><code>for layer_props {
+    name := copy_string(to_string(it.layerName.data));
+    <mark>extensions, ok := instance_extension_names(it.layerName.data);</mark>   // the layer's own list, from its manifest; the API's buffer is null-terminated, a Jai string is not
+    if !ok  return inv, false;
+    layers[it_index] = .{name, it.specVersion, it.implementationVersion, copy_string(to_string(it.description.data)), extensions};</code></pre>
+  <aside class="sidebar" id="sb-layer" data-term="Validation layer">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd>the debug layer, switched on with <code>ID3D12Debug::EnableDebugLayer</code> before the device exists; a runtime component rather than a library a loader interposes</dd>
+      <dt>Metal</dt><dd>API validation, switched on in the Xcode scheme or with <code>MTL_DEBUG_LAYER=1</code>; the framework wraps its own objects</dd>
+    </dl>
+    <pre class="snippet" data-illustrative="d3d12"><code>ID3D12Debug* dbg;
+if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&amp;dbg))))
+    dbg-&gt;EnableDebugLayer();</code></pre>
+  </aside>
+</section>
+
+<section class="step" id="s3">
+  <h2>3. <code>vkCreateInstance</code> builds the chain</h2>
+  <p>An instance is the loader's object. Creating one is where the loader assembles the dispatch chain
+  that every later call will run through: your call enters a small <em>trampoline</em> in the loader, which
+  jumps to the first enabled layer's implementation of the function; that layer calls the next; the last
+  layer calls back into the loader's <em>terminator</em>, which fans the call out to every ICD it loaded. The
+  first word of the <code>VkInstance</code> handle you get back points at that dispatch table, which is what makes
+  the handle "dispatchable". <code>given.jai</code> asks for no layers and no extensions here, because this
+  instance exists only to reach the drivers in the next step; the test harness's instance, which lesson 1
+  shows, asks for the validation layer and so gets a chain with one layer in it.</p>
+  <pre class="snippet" data-src="vulkan/exercise-0/given.jai:58"><code>app: VkApplicationInfo;
+app.pApplicationName = "exercise-0";
+app.apiVersion       = VK_API_VERSION_1_3;
+ici: VkInstanceCreateInfo;
+ici.pApplicationInfo = *app;
+instance: VkInstance;
+<mark>result = vkCreateInstance(*ici, null, *instance);</mark></code></pre>
+  <aside class="sidebar" id="sb-icd" data-term="ICD">
+    <p class="sidebar-lead">Elsewhere</p>
+    <dl class="elsewhere">
+      <dt>D3D12</dt><dd>the user-mode driver (UMD) per adapter; you never name it, <code>IDXGIFactory::EnumAdapters</code> lists adapters and <code>D3D12CreateDevice</code> loads the DLL the adapter maps to</dd>
+      <dt>Metal</dt><dd>no manifests and no file to point at: <code>MTLCreateSystemDefaultDevice</code> and <code>MTLCopyAllDevices</code> return the devices the system driver exposes</dd>
+    </dl>
+  </aside>
+</section>
+
+<section class="step" id="s4">
+  <h2>4. Physical devices: the driver asks the kernel</h2>
+  <p><code>vkEnumeratePhysicalDevices</code> is the first call whose answer comes from below the driver lane. The
+  terminator asks every ICD; each ICD opens the kernel's render node for the hardware it drives and asks
+  the kernel driver to describe the device, and <code>vkGetPhysicalDeviceProperties</code> then reports what the
+  ICD learned: the name, the API version it implements, the vendor's own driver version packing, and the
+  device type. On RADV the render node is <code>/dev/dri/renderD128</code> and the question is a series of
+  <code>DRM_AMDGPU_INFO</code> ioctls to <code>amdgpu</code>; NVIDIA's driver asks its own kernel module in its
+  own way, which is why <code>driverVersion</code> needs vendor-specific unpacking in exercise 0. Device
+  extensions are the ICD's answer about what the hardware and driver pair can do, so they are asked per
+  device.</p>
+  <pre class="snippet" data-src="vulkan/exercise-0/given.jai:85"><code>devices := NewArray(device_count, Device_Info);
+for physicals {
+    props: VkPhysicalDeviceProperties;
+    <mark>vkGetPhysicalDeviceProperties(it, *props);</mark>
+    extension_count: u32;
+    result = vkEnumerateDeviceExtensionProperties(it, null, *extension_count, null);</code></pre>
+</section>
+
+<section class="step" id="s5">
+  <h2>5. Three things that are not one thing</h2>
+  <p>Now the model to take apart. "The command buffer is bytecode plus data that somehow reaches the GPU,
+  whose firmware interprets it" packs three different things into one word, and they live in three
+  different places.</p>
+  <p><strong>Shader bytecode</strong> is SPIR-V: a stream of 32-bit words your build produced with
+  <code>glslc</code> and your program holds in its own memory. No GPU runs SPIR-V. When you create a pipeline
+  (lesson 3), the ICD compiles those words into the instruction set of the shader cores in front of it,
+  and that native code is what the cores execute. SPIR-V is compiled, not interpreted, and the compiler is
+  the ICD on your CPU.</p>
+  <p><strong>A command buffer</strong> is memory the driver owns. Every <code>vkCmd*</code> call you make while
+  recording appends the driver's own representation of that command to it (lesson 4). It is not a
+  portable format and no part of it is "sent" anywhere at submit time: on RADV the driver writes the
+  hardware's packet format directly into GPU-visible memory as you record, so by the time you submit, the
+  buffer already is the command stream.</p>
+  <p><strong>The command stream</strong> is what the GPU's command processor reads: a microcontroller block
+  (on AMD hardware the PFP, ME and MEC engines, running firmware the kernel uploads) that fetches packets
+  from memory, decodes them, and programs the rest of the chip, including pointing the shader cores at the
+  compiled code. So the "firmware interprets it" half of the picture is right for packets and wrong for
+  shaders. Your program never touches the stream; the ICD writes it and the kernel tells the hardware
+  where it is.</p>
+  <figure class="diagram">
+    <svg viewBox="0 0 660 336" role="img" aria-labelledby="fig0-title">
+      <title id="fig0-title">The three layers, with the three things that are not one thing placed where they live</title>
+      <defs>
+        <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <g data-lane="cpu">
+        <rect class="band" x="4" y="4" width="652" height="100"/>
+        <text class="band-tag" x="14" y="22">CPU · your process</text>
+        <g class="node"><rect x="14" y="34" width="150" height="30"/><text x="89" y="54" text-anchor="middle">your Jai program</text></g>
+        <g class="node"><rect x="196" y="34" width="150" height="30"/><text x="271" y="54" text-anchor="middle">Vulkan bindings</text></g>
+        <g class="token"><rect x="470" y="34" width="170" height="30"/><text x="555" y="54" text-anchor="middle">SPIR-V words</text></g>
+        <path class="link" d="M164,49 L194,49"/>
+        <text class="small" x="14" y="90">memory in your process; nothing here runs on the GPU</text>
+      </g>
+      <g data-lane="driver">
+        <rect class="band" x="4" y="112" width="652" height="108"/>
+        <text class="band-tag" x="14" y="130">driver · loader, layers, ICD</text>
+        <g class="node"><rect x="14" y="142" width="150" height="30"/><text x="89" y="162" text-anchor="middle">libvulkan.so.1</text></g>
+        <g class="node"><rect x="186" y="142" width="226" height="30"/><text x="299" y="162" text-anchor="middle">VK_LAYER_KHRONOS_validation</text></g>
+        <g class="node"><rect x="430" y="142" width="210" height="30"/><text x="535" y="162" text-anchor="middle">libvulkan_radeon.so (ICD)</text></g>
+        <g class="token"><rect x="430" y="184" width="210" height="28"/><text x="535" y="203" text-anchor="middle">command buffer</text></g>
+        <path class="link" d="M271,64 L120,140"/>
+        <path class="link" d="M164,157 L184,157"/>
+        <path class="link" d="M412,157 L428,157"/>
+        <path class="link hot" d="M555,64 L545,140"/>
+        <path class="link" d="M535,172 L535,182"/>
+        <text class="small" x="14" y="200">the chain: trampoline → layers → terminator → ICD</text>
+      </g>
+      <g data-lane="gpu">
+        <rect class="band" x="4" y="228" width="652" height="104"/>
+        <text class="band-tag" x="14" y="246">GPU · kernel driver and hardware</text>
+        <g class="node"><rect x="14" y="258" width="150" height="30"/><text x="89" y="278" text-anchor="middle">amdgpu (kernel)</text></g>
+        <g class="node"><rect x="250" y="258" width="170" height="30"/><text x="335" y="278" text-anchor="middle">command processor</text></g>
+        <g class="node"><rect x="470" y="258" width="170" height="30"/><text x="555" y="278" text-anchor="middle">shader cores</text></g>
+        <g class="token"><rect x="250" y="298" width="170" height="26"/><text x="335" y="316" text-anchor="middle">command stream</text></g>
+        <path class="link" d="M440,172 C 400,200 200,215 110,256"/>
+        <path class="link hot" d="M430,205 C 400,240 390,290 422,308"/>
+        <path class="link" d="M335,296 L335,290"/>
+        <path class="link" d="M420,273 L468,273"/>
+        <text class="small" x="470" y="316">compiled shader code (ISA)</text>
+      </g>
+    </svg>
+    <figcaption>The three layers as lanes. SPIR-V sits in your process and goes into the ICD to be compiled; the
+    command buffer is the ICD's memory, filled while you record; the command stream is those same packets as the
+    command processor reads them. The ioctl from the ICD into the kernel is the only arrow that crosses into the
+    bottom band from above.</figcaption>
+  </figure>
+  <p>From here on the lanes mean exactly this: <strong>CPU</strong> is your program and the bindings;
+  <strong>driver</strong> is the loader, the layers and the ICD, all running in your process; <strong>GPU</strong>
+  is the kernel driver and the hardware. A box in the driver lane still runs on your CPU; it is in that
+  lane because the code is not yours and its memory is not yours.</p>
+</section>
+
+<section class="endnotes">
+  <h2>Endnotes</h2>
+  <details class="endnote">
+    <summary><code>VK_LOADER_DEBUG=all</code></summary>
+    <p>A common alternative to guessing what the loader did is <code>VK_LOADER_DEBUG=all</code> in the environment,
+    which enables the loader's own trace; useful for seeing which manifests it read, which driver libraries
+    it opened and which layers it inserted; the cost is a great deal of stderr and no code change at all.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>VK_DRIVER_FILES</code></summary>
+    <p>A common alternative on a machine with two GPUs is <code>VK_DRIVER_FILES</code>, which pins the loader to one
+    ICD manifest; useful on the hybrid laptop when the integrated GPU keeps answering first; the cost is a
+    per-run environment variable, and the other GPU vanishes from <code>vkEnumeratePhysicalDevices</code>.</p>
+  </details>
+  <details class="endnote">
+    <summary><code>VK_INSTANCE_LAYERS</code></summary>
+    <p>A common alternative to naming a layer in <code>VkInstanceCreateInfo</code> is <code>VK_INSTANCE_LAYERS</code>,
+    which makes the loader enable it for every instance the program creates; useful for trying RenderDoc's
+    capture layer on a program you did not write; the cost is the environment variable and a layer the
+    program did not ask for sitting in its chain.</p>
+  </details>
+</section>
+
+<p class="deep-dive">Deep dives: <a href="deep-dives/README.md">none yet for this lesson</a>.</p>
+
+<section class="sources">
+  <h2>Sources</h2>
+  <ul>
+    <li>Vulkan-Loader docs: <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderInterfaceArchitecture.md">LoaderInterfaceArchitecture.md</a> (trampolines, terminators, the call chains),
+        <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderLayerInterface.md">LoaderLayerInterface.md</a> (manifest directories, <code>VK_INSTANCE_LAYERS</code>),
+        <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md">LoaderDriverInterface.md</a> (<code>icd.d</code> search paths, <code>VK_DRIVER_FILES</code>, interface negotiation),
+        <a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDebugging.md">LoaderDebugging.md</a> (<code>VK_LOADER_DEBUG</code>).</li>
+    <li>Vulkan specification, <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#extendingvulkan-layers">Layers</a> and
+        <a href="https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#extendingvulkan-extensions">Extensions</a>.</li>
+    <li>Mesa, <a href="https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/amd/vulkan/radv_physical_device.c">src/amd/vulkan/radv_physical_device.c</a>: <code>radv_physical_device_try_create</code> opens <code>drm_device-&gt;nodes[DRM_NODE_RENDER]</code> and queries with <code>DRM_AMDGPU_INFO</code>.</li>
+    <li>Linux, <a href="https://github.com/torvalds/linux/blob/master/Documentation/gpu/amdgpu/driver-core.rst">Documentation/gpu/amdgpu/driver-core.rst</a> (the GC block and its CP microcontrollers: ME, PFP, CE, MEC) and
+        <a href="https://github.com/torvalds/linux/blob/master/include/uapi/drm/amdgpu_drm.h">include/uapi/drm/amdgpu_drm.h</a> (<code>DRM_AMDGPU_INFO</code>, <code>DRM_AMDGPU_CS</code>).</li>
+    <li>Vulkan-Tools, <a href="https://github.com/KhronosGroup/Vulkan-Tools/blob/main/vulkaninfo/vulkaninfo.h">vulkaninfo/vulkaninfo.h</a>: <code>GetDriverVersionString</code>, the NVIDIA 10/8/8/6 split against the standard packing.</li>
+    <li><a href="../../vulkan/exercise-0/given.jai">vulkan/exercise-0/given.jai</a>: the five calls as this lesson's program makes them.</li>
+  </ul>
+</section>
+
+<p class="next"><a href="../../vulkan/exercise-0/README.md">Now do exercise 0</a></p>
+</div>
+
+</article>
+</body>
+</html>
