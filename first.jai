@@ -32,7 +32,7 @@ VERBS :: string.[
     "build <api>/<name>                 compile <api>/<name>/main.jai to build/<api>-<name> (shaders first)",
     "run <api>/<name> [args...]         build, then run the binary with args",
     "test <api>/<name> [args...]        compile tests.jai to build/<api>-<name>-tests and run it headlessly",
-    "test-all                           run every <api>/<name>/tests.jai under vulkan/, directx/, metal/, tools/",
+    "test-all                           run every tests.jai under vulkan/, directx/, metal/, tools/, solutions/",
     "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
     "check-lessons                      check every lessons/**/*.html, index.html and spine.js against the markup contract",
@@ -141,11 +141,22 @@ require_target :: (verb: string, rest: [] string) -> (target: string, ok: bool) 
 }
 
 target_dir   :: (target: string) -> string { return tprint("%1%2/", ROOT, target); }
+
+// "solutions/<api>/<name>" -> "<api>/<name>", the exercise a solution target answers; "" otherwise.
+exercise_of :: (target: string) -> string {
+    PREFIX :: "solutions/";
+    if !begins_with(target, PREFIX)  return "";
+    return slice(target, PREFIX.count, target.count - PREFIX.count);
+}
 binary_name  :: (target: string, suffix: string) -> string { return tprint("%1%2", replace(target, "/", "-"), suffix); }
 binary_path  :: (target: string, suffix: string) -> string { return tprint("%1build/%2", ROOT, binary_name(target, suffix)); }
 
-// Compile <target>/<entry> into build/<api>-<name><suffix>. Shaders first when the target has any.
+// Compile <target>/<entry> into build/<api>-<name><suffix>. Shaders first when the target has any;
+// a solution target also compiles its exercise's shaders, because the exercise's given.jai loads
+// its SPIR-V relative to its own #filepath.
 build_target :: (target: string, entry: string, suffix: string) -> bool {
+    exercise := exercise_of(target);
+    if exercise.count && !compile_shaders(exercise)  return false;
     if !compile_shaders(target)  return false;
 
     source := tprint("%1%2", target_dir(target), entry);
@@ -244,12 +255,12 @@ run_binary :: (path: string, args: [] string, env: [] string) -> s32 {
 // Every target with a tests.jai, in sorted order; one summary line each, then a total.
 test_all :: () -> bool {
     targets: [..] string;
-    for api: string.["vulkan", "directx", "metal", "tools"] {
+    for api: string.["vulkan", "directx", "metal", "tools", "solutions"] {
         dir := tprint("%1%2", ROOT, api);
         if !file_exists(dir)  continue;
         for file_list(dir, recursive = true) {
             if !ends_with(it, "/tests.jai")  continue;
-            rel := slice(it, ROOT.count, it.count - ROOT.count - "/tests.jai".count);   // "<api>/<name>"
+            rel := slice(it, ROOT.count, it.count - ROOT.count - "/tests.jai".count);   // "<api>/<name>" or "solutions/<api>/<name>"
             array_add(*targets, copy_string(rel));
         }
     }
