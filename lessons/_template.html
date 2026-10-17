@@ -28,7 +28,7 @@
       <button class="box" data-step="s4">submit_and_wait: vkQueueSubmit2, then vkWaitForFences</button>
     </div></div>
     <div class="lane" data-lane="driver"><span class="lane-tag">driver</span><div class="bar">
-      <button class="box" data-step="s4">translate</button>
+      <button class="box" data-step="s4">build the submission</button>
       <span class="arrow" data-step="s4">→</span>
       <button class="box" data-step="s4">kernel: submit</button>
     </div></div>
@@ -107,10 +107,10 @@ list-&gt;ClearRenderTargetView(rtv, color, 0, nullptr);</code></pre>
 
 <section class="step" id="s4">
   <h2>4. Submit the command buffer and wait for the fence: this is where the work leaves the CPU</h2>
-  <p><code>submit_and_wait</code> wraps <code>vkQueueSubmit2</code> and a fence. Submit is where the driver translates
-  the recorded commands into its own command stream and hands them to the kernel driver, which schedules
-  them on the GPU's queue. The fence wait then blocks the CPU until the GPU signals that the clear is
-  done. Everything the three lanes show lit for this step happens inside that one call.</p>
+  <p><code>submit_and_wait</code> wraps <code>vkQueueSubmit2</code> and a fence. Submit hands the recorded commands,
+  already in the driver's own format, to the kernel driver, which schedules them on the GPU's queue. The
+  fence wait then blocks the CPU until the GPU signals that the clear is done. Everything the three lanes
+  show lit for this step happens inside that one call.</p>
   <pre class="snippet" data-src="vulkan/harness-check/tests.jai:107"><code><mark>submit_and_wait(ctx, cb);</mark></code></pre>
 </section>
 
