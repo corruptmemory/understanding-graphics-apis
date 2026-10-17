@@ -46,6 +46,39 @@ CASES :: Case.[
     .{"no-article",                 "<article class=\"lesson\"", "<article class=\"page\"", .["no <article class=\"lesson\">"]},
 ];
 
+// ---- deep dives -------------------------------------------------------------------------
+
+DIVE_PATH :: "lessons/vulkan/deep-dives/radv-draw.html";   // so ../00-a.html resolves to the fixture lesson
+
+DIVE_CASES :: Case.[
+    .{"dive-good",                 "", "", .[]},
+    .{"dive-no-article",           "<article class=\"deep-dive page\"", "<article class=\"page\"", .["no <article class=\"deep-dive\">"]},
+    .{"dive-no-lesson",            " data-lesson=\"0\"", "", .["deep-dive lacks data-lesson"]},
+    .{"dive-crumb-not-a-lesson",   "href=\"../00-a.html\"", "href=\"../neighbour.html\"", .["deep dive has no crumb link to its lesson"]},   // exists, is not NN-*.html
+    .{"dive-snippet-missing-file", "src/sample.jai:3", "src/missing.jai:1", .["snippet 'src/missing.jai:1': no such file"]},
+    .{"dive-no-sources",           "<section class=\"sources\">", "<section class=\"refs\">", .["no sources section"]},
+];
+
+// The same text as fixtures/lessons/vulkan/deep-dives/sample-dive.html.
+GOOD_DIVE :: #string HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sample deep dive</title>
+</head>
+<body>
+<article class="deep-dive page" data-track="vulkan" data-lesson="0">
+<p class="crumbs"><a href="../00-a.html">Lesson 0</a> · Deep dive</p>
+<h1>Sample deep dive</h1>
+<p>Prose.</p>
+<pre class="snippet" data-src="src/sample.jai:3"><code>x := 1;</code></pre>
+<section class="sources"><h2>Sources</h2><ul><li>A source</li></ul></section>
+</article>
+</body>
+</html>
+HTML
+
 Resolve_Case :: struct { page: string; href: string; want: string; }
 
 RESOLVE_CASES :: Resolve_Case.[
@@ -68,6 +101,7 @@ INDEX_CASES :: Index_Case.[
     .{"index-rows-out-of-order",   "data-number=\"1\">", "data-number=\"2\">", .["lessons/vulkan/00-a.html"], .["track 'vulkan' rows are [0, 2, 2], want 0..2 in order"]},
     .{"index-done-without-link",   "data-state=\"todo\">lesson", "data-state=\"done\">lesson", .["lessons/vulkan/00-a.html"], .["row 2 says the lesson is done but links nothing"]},
     .{"index-tracks-out-of-order", "data-track=\"directx\"", "data-track=\"metal\"", .["lessons/vulkan/00-a.html"], .["tracks are [vulkan, metal, metal], want vulkan, directx, metal"]},
+    .{"index-ignores-deep-dives",  "", "", .["lessons/vulkan/00-a.html", "lessons/vulkan/deep-dives/radv-draw.html"], .[]},
 ];
 
 GOOD_INDEX :: #string HTML
@@ -175,13 +209,12 @@ describe :: (findings: [] Finding) -> string {
     return builder_to_string(*b);
 }
 
-main :: () {
-    fixtures := tprint("%fixtures/", #filepath);
-
-    for c: CASES {
-        html := GOOD;
-        if c.from  html = replace(GOOD, c.from, c.to);
-        findings := check_lesson(html, PAGE_PATH, fixtures);
+// One mutate-and-expect table against one checker.
+run_table :: (cases: [] Case, good: string, page_path: string, fixtures: string, check: (string, string, string) -> [..] Finding) {
+    for c: cases {
+        html := good;
+        if c.from  html = replace(good, c.from, c.to);
+        findings := check(html, page_path, fixtures);
 
         ok := findings.count == c.expect.count;
         for want: c.expect {
@@ -191,6 +224,13 @@ main :: () {
         }
         report(c.name, ok, tprint("% findings, want %: %", findings.count, c.expect.count, describe(findings)));
     }
+}
+
+main :: () {
+    fixtures := tprint("%fixtures/", #filepath);
+
+    run_table(CASES,      GOOD,      PAGE_PATH, fixtures, check_lesson);
+    run_table(DIVE_CASES, GOOD_DIVE, DIVE_PATH, fixtures, check_deep_dive);
 
     for c: INDEX_CASES {
         html := GOOD_INDEX;
@@ -259,6 +299,13 @@ main :: () {
     js_good := check_js("const y = 1", "spine.js");
     report("check_js flags fetch",   js_bad.count == 1 && contains(js_bad[0].message, "fetch("), describe(js_bad));
     report("check_js passes plain",  js_good.count == 0, describe(js_good));
+
+    // ---- deep dives are routed to their own contract -----------------------------------
+    DIVE_FIXTURE :: "lessons/vulkan/deep-dives/sample-dive.html";
+    all_findings, _ := check_all(fixtures);
+    dive_findings: [..] Finding;
+    for all_findings  if it.path == DIVE_FIXTURE  array_add(*dive_findings, it);
+    report("check_all_routes_deep_dives", dive_findings.count == 0, describe(dive_findings));
 
     print("% passed, % failed\n", passed, failed);
     if failed > 0  exit(1);

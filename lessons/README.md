@@ -96,3 +96,17 @@ window at desktop width, and a long label makes the lane scroll.
 
 `spine.js` lights the boxes of the step nearest the reading line, fills the strip's chips below 1100 px,
 and jumps to a step when its box is clicked. It needs nothing from the page beyond the contract.
+
+## Deep dives
+
+A deep dive is an optional page on one topic, added only when that topic grabs you. It lives at
+`lessons/<track>/deep-dives/<slug>.html`, is linked from its lesson's `p.deep-dive`, and is not listed on
+the index. The checker holds it to a lighter contract than a lesson: no outcomes, no steps, no `.where`,
+no `<noscript>`, no exercise link and no next link.
+
+| Element                                                                               | Required                             | Checker message when violated                                                                   |
+|---------------------------------------------------------------------------------------|--------------------------------------|-------------------------------------------------------------------------------------------------|
+| `<article class="deep-dive page" data-track="vulkan" data-lesson="3">`                | exactly one; both attributes present | `no <article class="deep-dive">` / `deep-dive lacks data-track` / `deep-dive lacks data-lesson` |
+| `<p class="crumbs">` with an `<a>` whose href resolves to `lessons/<track>/NN-*.html` | present                              | `deep dive has no crumb link to its lesson`                                                     |
+| `<h1>`                                                                                | exactly one                          | `deep dive has no h1` / `deep dive has more than one h1`                                        |
+| snippets, sidebars, endnotes, sources, links and fragments                            | the lesson rules above, unchanged    | the lesson messages                                                                             |

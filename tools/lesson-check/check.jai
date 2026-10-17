@@ -14,11 +14,12 @@ Finding :: struct { path: string; line: int; message: string; }   // line is 1-b
 
 // ---- the contract ------------------------------------------------------------------------------
 
+add :: (findings: *[..] Finding, page_path: string, html: string, offset: int, message: string) {
+    array_add(findings, .{page_path, line_of(html, offset), message});
+}
+
 check_lesson :: (html: string, page_path: string, root: string) -> [..] Finding {
     findings: [..] Finding;
-    add :: (findings: *[..] Finding, page_path: string, html: string, offset: int, message: string) {
-        array_add(findings, .{page_path, line_of(html, offset), message});
-    }
 
     // article
     articles := collect(html, "article", "lesson");
@@ -68,66 +69,9 @@ check_lesson :: (html: string, page_path: string, root: string) -> [..] Finding 
         if collect(inner(html, it), "h2", "").count == 0  add(*findings, page_path, html, it.start, tprint("step '%' has no h2", id));
     }
 
-    // snippets
-    for collect(html, "pre", "snippet") {
-        src, has_src     := attr(it, "data-src");
-        _,   illustrative := attr(it, "data-illustrative");
-        if illustrative && has_src {
-            add(*findings, page_path, html, it.start, "illustrative snippet carries data-src");
-        } else if !illustrative && !has_src {
-            add(*findings, page_path, html, it.start, "snippet has neither data-src nor data-illustrative");
-        } else if has_src {
-            colon := find_index_from_right(src, #char ":");
-            line_text := ifx colon >= 0 then slice(src, colon + 1, src.count - colon - 1) else "";
-            line, parsed, remainder := string_to_int(line_text);
-            if colon < 0 || !parsed || remainder.count > 0 {
-                add(*findings, page_path, html, it.start, tprint("snippet '%': data-src must be path:line", src));
-                continue;
-            }
-            file := tprint("%1%2", root, slice(src, 0, colon));
-            if !file_exists(file) {
-                add(*findings, page_path, html, it.start, tprint("snippet '%': no such file", src));
-                continue;
-            }
-            text, ok := read_entire_file(file, log_errors = false);
-            if !ok {
-                add(*findings, page_path, html, it.start, tprint("snippet '%': could not read the file", src));
-                continue;
-            }
-            if line < 1 || line > count_lines(text)  add(*findings, page_path, html, it.start, tprint("snippet '%': line is past the end", src));
-        }
-    }
-
-    // sidebars
-    for collect(html, "aside", "sidebar") {
-        _, has_id   := attr(it, "id");
-        _, has_term := attr(it, "data-term");
-        if !has_id    add(*findings, page_path, html, it.start, "sidebar lacks id");
-        if !has_term  add(*findings, page_path, html, it.start, "sidebar lacks data-term");
-        body := inner(html, it);
-        dls := collect(body, "dl", "elsewhere");
-        if dls.count == 0 {
-            add(*findings, page_path, html, it.start, "sidebar has no dl.elsewhere");
-        } else {
-            pairs := inner(body, dls[0]);
-            if collect(pairs, "dt", "").count == 0 || collect(pairs, "dd", "").count == 0 {
-                add(*findings, page_path, html, it.start, "sidebar's dl.elsewhere has no dt/dd pair");
-            }
-            for dt: collect(pairs, "dt", "") {   // the concept map only knows these two columns
-                api := trim(inner(pairs, dt));
-                if api != "D3D12" && api != "Metal"  add(*findings, page_path, html, it.start, tprint("sidebar dt '%' is not D3D12 or Metal", api));
-            }
-        }
-    }
-
-    // endnotes
-    endnotes := collect(html, "details", "endnote");
-    if endnotes.count > 3  add(*findings, page_path, html, endnotes[3].start, tprint("% endnotes, at most 3", endnotes.count));
-    for endnotes {
-        _, open := attr(it, "open");
-        if open  add(*findings, page_path, html, it.start, "endnote is open by default");
-        if collect(inner(html, it), "summary", "").count == 0  add(*findings, page_path, html, it.start, "endnote has no summary");
-    }
+    check_snippets(html, page_path, root, *findings);
+    check_sidebars(html, page_path, *findings);
+    check_endnotes(html, page_path, *findings);
 
     // the where container, the strip, the spine
     wheres := collect(html, "div", "where");
@@ -183,13 +127,7 @@ check_lesson :: (html: string, page_path: string, root: string) -> [..] Finding 
     }
     for step_ids  if !array_find(boxed, it)  add(*findings, page_path, html, 0, tprint("step '%' has no box in the spine", it));
 
-    // sources
-    sources := collect(html, "section", "sources");
-    if sources.count == 0 {
-        add(*findings, page_path, html, 0, "no sources section");
-    } else if collect(inner(html, sources[0]), "li", "").count == 0 {
-        add(*findings, page_path, html, sources[0].start, "sources has no entries");
-    }
+    check_sources(html, page_path, *findings);
 
     // next
     nexts := collect(html, "p", "next");
@@ -203,6 +141,144 @@ check_lesson :: (html: string, page_path: string, root: string) -> [..] Finding 
     if collect(html, "noscript", "").count == 0  add(*findings, page_path, html, 0, "no noscript note");
 
     // links
+    for check_links(html, page_path, root)  array_add(*findings, it);
+
+    return findings;
+}
+
+// ---- rules shared by lessons and deep dives ----------------------------------------------------
+
+// Every snippet carries data-src="path:line" (the path exists under root, the line is in range) or
+// data-illustrative, never both.
+check_snippets :: (html: string, page_path: string, root: string, findings: *[..] Finding) {
+    for collect(html, "pre", "snippet") {
+        src, has_src     := attr(it, "data-src");
+        _,   illustrative := attr(it, "data-illustrative");
+        if illustrative && has_src {
+            add(findings, page_path, html, it.start, "illustrative snippet carries data-src");
+        } else if !illustrative && !has_src {
+            add(findings, page_path, html, it.start, "snippet has neither data-src nor data-illustrative");
+        } else if has_src {
+            colon := find_index_from_right(src, #char ":");
+            line_text := ifx colon >= 0 then slice(src, colon + 1, src.count - colon - 1) else "";
+            line, parsed, remainder := string_to_int(line_text);
+            if colon < 0 || !parsed || remainder.count > 0 {
+                add(findings, page_path, html, it.start, tprint("snippet '%': data-src must be path:line", src));
+                continue;
+            }
+            file := tprint("%1%2", root, slice(src, 0, colon));
+            if !file_exists(file) {
+                add(findings, page_path, html, it.start, tprint("snippet '%': no such file", src));
+                continue;
+            }
+            text, ok := read_entire_file(file, log_errors = false);
+            if !ok {
+                add(findings, page_path, html, it.start, tprint("snippet '%': could not read the file", src));
+                continue;
+            }
+            if line < 1 || line > count_lines(text)  add(findings, page_path, html, it.start, tprint("snippet '%': line is past the end", src));
+        }
+    }
+}
+
+// Every sidebar has an id, a term, and a dl.elsewhere whose dt cells are the two map columns.
+check_sidebars :: (html: string, page_path: string, findings: *[..] Finding) {
+    for collect(html, "aside", "sidebar") {
+        _, has_id   := attr(it, "id");
+        _, has_term := attr(it, "data-term");
+        if !has_id    add(findings, page_path, html, it.start, "sidebar lacks id");
+        if !has_term  add(findings, page_path, html, it.start, "sidebar lacks data-term");
+        body := inner(html, it);
+        dls := collect(body, "dl", "elsewhere");
+        if dls.count == 0 {
+            add(findings, page_path, html, it.start, "sidebar has no dl.elsewhere");
+        } else {
+            pairs := inner(body, dls[0]);
+            if collect(pairs, "dt", "").count == 0 || collect(pairs, "dd", "").count == 0 {
+                add(findings, page_path, html, it.start, "sidebar's dl.elsewhere has no dt/dd pair");
+            }
+            for dt: collect(pairs, "dt", "") {   // the concept map only knows these two columns
+                api := trim(inner(pairs, dt));
+                if api != "D3D12" && api != "Metal"  add(findings, page_path, html, it.start, tprint("sidebar dt '%' is not D3D12 or Metal", api));
+            }
+        }
+    }
+}
+
+// At most three endnotes, each closed by default, each with a summary.
+check_endnotes :: (html: string, page_path: string, findings: *[..] Finding) {
+    endnotes := collect(html, "details", "endnote");
+    if endnotes.count > 3  add(findings, page_path, html, endnotes[3].start, tprint("% endnotes, at most 3", endnotes.count));
+    for endnotes {
+        _, open := attr(it, "open");
+        if open  add(findings, page_path, html, it.start, "endnote is open by default");
+        if collect(inner(html, it), "summary", "").count == 0  add(findings, page_path, html, it.start, "endnote has no summary");
+    }
+}
+
+// A sources section with at least one entry.
+check_sources :: (html: string, page_path: string, findings: *[..] Finding) {
+    sources := collect(html, "section", "sources");
+    if sources.count == 0 {
+        add(findings, page_path, html, 0, "no sources section");
+    } else if collect(inner(html, sources[0]), "li", "").count == 0 {
+        add(findings, page_path, html, sources[0].start, "sources has no entries");
+    }
+}
+
+// ---- deep dives --------------------------------------------------------------------------------
+
+// A deep dive lives at lessons/<track>/deep-dives/<slug>.html.
+is_deep_dive :: (page_path: string) -> bool {
+    return contains(page_path, "/deep-dives/");
+}
+
+// lessons/<track>/NN-<slug>.html: the pages the index lists and the concept map reads.
+is_lesson_page :: (path: string) -> bool {
+    segments := split(path, "/");
+    if segments.count != 3 || segments[0] != "lessons"  return false;
+    file := segments[2];
+    return file.count >= 3 && is_digit_char(file[0]) && is_digit_char(file[1]) && file[2] == #char "-";
+}
+
+// The lighter contract: an article with its track and lesson, a crumb back to the lesson, one h1,
+// and the shared rules. No outcomes, steps, spine, noscript, exercise link or next link.
+check_deep_dive :: (html: string, page_path: string, root: string) -> [..] Finding {
+    findings: [..] Finding;
+
+    // article
+    articles := collect(html, "article", "deep-dive");
+    if articles.count == 0 {
+        add(*findings, page_path, html, 0, "no <article class=\"deep-dive\">");
+    } else {
+        if articles.count > 1  add(*findings, page_path, html, articles[1].start, "more than one <article class=\"deep-dive\">");
+        a := articles[0];
+        _, has_track  := attr(a, "data-track");
+        _, has_lesson := attr(a, "data-lesson");
+        if !has_track   add(*findings, page_path, html, a.start, "deep-dive lacks data-track");
+        if !has_lesson  add(*findings, page_path, html, a.start, "deep-dive lacks data-lesson");
+    }
+
+    // crumbs: a link that resolves to a lesson page
+    linked := false;
+    crumbs := collect(html, "p", "crumbs");
+    for crumbs {
+        for link: collect(inner(html, it), "a", "") {
+            href, has_href := attr(link, "href");
+            if has_href && is_lesson_page(resolve_relative(page_path, href))  linked = true;
+        }
+    }
+    if !linked  add(*findings, page_path, html, ifx crumbs.count then crumbs[0].start else 0, "deep dive has no crumb link to its lesson");
+
+    // h1
+    h1s := collect(html, "h1", "");
+    if h1s.count == 0      add(*findings, page_path, html, 0, "deep dive has no h1");
+    else if h1s.count > 1  add(*findings, page_path, html, h1s[1].start, "deep dive has more than one h1");
+
+    check_snippets(html, page_path, root, *findings);
+    check_sidebars(html, page_path, *findings);
+    check_endnotes(html, page_path, *findings);
+    check_sources(html, page_path, *findings);
     for check_links(html, page_path, root)  array_add(*findings, it);
 
     return findings;
@@ -279,6 +355,7 @@ check_index :: (html: string, root: string, pages: [] string) -> [..] Finding {
     }
     for page: pages {
         if ends_with(page, "/_template.html")  continue;
+        if is_deep_dive(page)                  continue;   // linked from their lesson, not the index
         if split(page, "/").count < 3          continue;   // only lessons/<track>/<file> pages must be listed
         if !array_find(hrefs, page)  array_add(*findings, .{PATH, 0, tprint("lesson page not linked from index: %", page)});
     }
@@ -382,13 +459,14 @@ lesson_pages :: (root: string) -> [..] string {
 check_all :: (root: string) -> (findings: [..] Finding, pages: int) {
     findings: [..] Finding;
     pages := lesson_pages(root);
-    for pages {
-        html, ok := read_entire_file(tprint("%1%2", root, it), log_errors = false);
+    for page: pages {
+        html, ok := read_entire_file(tprint("%1%2", root, page), log_errors = false);
         if !ok {
-            array_add(*findings, .{it, 0, "could not read the page"});
+            array_add(*findings, .{page, 0, "could not read the page"});
             continue;
         }
-        for check_lesson(html, it, root)  array_add(*findings, it);
+        if is_deep_dive(page)  for check_deep_dive(html, page, root)  array_add(*findings, it);
+        else                   for check_lesson(html, page, root)     array_add(*findings, it);
     }
 
     count := pages.count;
@@ -440,10 +518,9 @@ Sidebar_Entry :: struct {
 collect_sidebars :: (root: string) -> [..] Sidebar_Entry {
     entries: [..] Sidebar_Entry;
     for page: lesson_pages(root) {
+        if !is_lesson_page(page)  continue;
         segments := split(page, "/");
-        if segments.count != 3  continue;   // lessons/<track>/<file>
         file := segments[2];
-        if file.count < 3 || !is_digit_char(file[0]) || !is_digit_char(file[1]) || file[2] != #char "-"  continue;
 
         html, ok := read_entire_file(tprint("%1%2", root, page), log_errors = false);
         if !ok {
