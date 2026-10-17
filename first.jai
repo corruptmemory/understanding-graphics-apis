@@ -32,7 +32,7 @@ VERBS :: string.[
     "build <api>/<name>                 compile <api>/<name>/main.jai to build/<api>-<name> (shaders first)",
     "run <api>/<name> [args...]         build, then run the binary with args",
     "test <api>/<name> [args...]        compile tests.jai to build/<api>-<name>-tests and run it headlessly",
-    "test-all                           run every tests.jai under vulkan/, directx/, metal/, tools/, solutions/",
+    "test-all [-solutions-only]         run every tests.jai under vulkan/, directx/, metal/, tools/, solutions/; -solutions-only skips the stub exercises and the projects",
     "capture <api>/<name> [path]        run the tests with -capture; the last readback lands in path (default build/<api>-<name>.png)",
     "shaders <api>/<name>               glslc every shaders/*.vert|*.frag|*.comp into <target>/.build/spv/",
     "check-lessons                      check every lessons/**/*.html, index.html and spine.js against the markup contract",
@@ -78,7 +78,9 @@ TEST_ENV :: string.["VK_LOADER_LAYERS_DISABLE=~implicit~"];
                    && run_binary(binary_path(target, "-tests"), array_view(rest, 1, rest.count - 1), TEST_ENV) == 0;
 
       case "test-all";
-        ok = test_all();
+        solutions_only := rest.count > 0 && rest[0] == "-solutions-only";
+        if rest.count > 0 && !solutions_only  log_error("test-all takes only -solutions-only, not '%'.", rest[0]);
+        else                                  ok = test_all(solutions_only);
 
       case "capture";
         target, found := require_target(verb, rest);
@@ -252,8 +254,11 @@ run_binary :: (path: string, args: [] string, env: [] string) -> s32 {
     return result.exit_code;
 }
 
-// Every target with a tests.jai, in sorted order; one summary line each, then a total.
-test_all :: () -> bool {
+// Every target with a tests.jai, in sorted order; one summary line each, then a total. With
+// solutions_only, the learner's targets are skipped: an exercise whose solutions/<api>/<name>/tests.jai
+// exists (its stubs are meant to fail) and every <api>/project-* (graded, not solved), so the laptop
+// check reports only targets expected to pass.
+test_all :: (solutions_only: bool) -> bool {
     targets: [..] string;
     for api: string.["vulkan", "directx", "metal", "tools", "solutions"] {
         dir := tprint("%1%2", ROOT, api);
@@ -261,6 +266,7 @@ test_all :: () -> bool {
         for file_list(dir, recursive = true) {
             if !ends_with(it, "/tests.jai")  continue;
             rel := slice(it, ROOT.count, it.count - ROOT.count - "/tests.jai".count);   // "<api>/<name>" or "solutions/<api>/<name>"
+            if solutions_only && is_learner_target(rel)  continue;
             array_add(*targets, copy_string(rel));
         }
     }
@@ -275,6 +281,13 @@ test_all :: () -> bool {
     }
     print("% targets, % failed\n", targets.count, failed);
     return failed == 0;
+}
+
+// A stub exercise (one with a reference solution) or a project: the targets a learner fills in.
+is_learner_target :: (target: string) -> bool {
+    if begins_with(target, "solutions/")  return false;
+    if file_exists(tprint("%1solutions/%2/tests.jai", ROOT, target))  return true;
+    return begins_with(path_filename(target), "project-");
 }
 
 // Refresh the committed header snapshot, regenerate the bindings, then build and run smoke.jai.

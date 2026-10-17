@@ -359,7 +359,10 @@ panel uses, so its diagrams are the template for the rest.
 
 - DirectX and Metal tracks: everything, gated on the OS.
 - Laptop verification of the harness and bindings under NVIDIA/Intel hybrid
-  graphics, including whether PRIME offload needs a note in lesson 1.
+  graphics, including whether PRIME offload needs a note in lesson 1. Since plan 3
+  part 1 this includes the reference solutions: `test-all -solutions-only` runs
+  every target expected to pass (the harness, the checker, the solutions) and
+  skips the stub exercises and the projects.
 - Whether any lesson should reference game-bootstrap's code. Default: no; this
   repo stands alone.
 - RenderDoc 1.46 was installed on the desktop on 2026-10-16 from the Arch repos
